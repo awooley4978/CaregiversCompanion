@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "326485052194",
+    "project_id": "carerecipients",
+    "storage_bucket": "carerecipients.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:326485052194:android:2ce061ba76b888dc4f337b",
+        "android_client_info": {
+          "package_name": "com.mycompany.newproject"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC5sgygGbY_h13WAGppCmwVflTANuOLTP0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,18 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "careNotes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "careRecipientRef",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    }
+  ]
+}
