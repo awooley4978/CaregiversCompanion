@@ -14,6 +14,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:new_project/backend/auth/auth_service.dart';
 import 'package:new_project/backend/org/org_service.dart';
 
 import 'firebase_test_setup.dart';
@@ -46,6 +47,10 @@ void main() {
         () async {
       final user = await signIn('u1',
           email: 'founder@example.com', displayName: 'Founder');
+
+      // Mirrors the real sign-in flow: the auth-state listener provisions the
+      // profile (phase 1) before org membership (phase 2).
+      await ensureUserProfile(user);
 
       final orgId = await ensureOrgMembership(user);
 
