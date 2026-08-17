@@ -36,6 +36,39 @@ class AppStateNotifier extends ChangeNotifier {
     showSplashImage = false;
     notifyListeners();
   }
+
+  // ---------------------------------------------------------------------
+  // Auth state (security phase 1).
+  //
+  // Driven by `FirebaseAuth.instance.authStateChanges()`, subscribed in
+  // main() via attachAuthStateListener() (lib/backend/auth/auth_service.dart).
+  // `authInitializing` is true until the persisted-session restore resolves,
+  // so the router's redirect stays put instead of flashing /login for an
+  // already-signed-in user.
+  // ---------------------------------------------------------------------
+  bool _isLoggedIn = false;
+  bool _authInitializing = true;
+
+  bool get isLoggedIn => _isLoggedIn;
+  bool get authInitializing => _authInitializing;
+
+  /// Called on every auth-state change (and once for the initial restore).
+  /// Clears [authInitializing] on the first call and notifies listeners so
+  /// GoRouter re-evaluates the global redirect.
+  void updateAuthState(bool loggedIn) {
+    _isLoggedIn = loggedIn;
+    _authInitializing = false;
+    notifyListeners();
+  }
+
+  /// Test hook: returns the notifier to its pre-restore state so a fresh
+  /// app pump simulates a cold start.
+  @visibleForTesting
+  void resetAuthStateForTest() {
+    _isLoggedIn = false;
+    _authInitializing = true;
+    notifyListeners();
+  }
 }
 
 GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
@@ -43,6 +76,25 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
       debugLogDiagnostics: true,
       refreshListenable: appStateNotifier,
       navigatorKey: appNavigatorKey,
+      // Global auth gate (security phase 1). While the persisted session is
+      // still restoring (authInitializing) we stay put — no redirect, so an
+      // already-signed-in user never flashes the login screen. Once resolved:
+      // unauthenticated users are confined to the auth routes; authenticated
+      // users are kept off them. Unknown URLs keep the existing errorBuilder
+      // behavior, which is only reachable for authenticated users (anything
+      // else redirects to /login first).
+      redirect: (context, state) {
+        if (appStateNotifier.authInitializing) {
+          return null;
+        }
+        final location = state.matchedLocation;
+        final isAuthRoute = location == AuthLoginWidget.routePath ||
+            location == AuthSignupWidget.routePath;
+        if (!appStateNotifier.isLoggedIn) {
+          return isAuthRoute ? null : AuthLoginWidget.routePath;
+        }
+        return isAuthRoute ? '/' : null;
+      },
       errorBuilder: (context, state) => AClientDirectoryWidget(),
       routes: [
         FFRoute(
@@ -113,7 +165,17 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
           name: CalendarPageWidget.routeName,
           path: CalendarPageWidget.routePath,
           builder: (context, params) => CalendarPageWidget(),
-        )
+        ),
+        FFRoute(
+          name: AuthLoginWidget.routeName,
+          path: AuthLoginWidget.routePath,
+          builder: (context, params) => AuthLoginWidget(),
+        ),
+        FFRoute(
+          name: AuthSignupWidget.routeName,
+          path: AuthSignupWidget.routePath,
+          builder: (context, params) => AuthSignupWidget(),
+        ),
       ].map((r) => r.toRoute(appStateNotifier)).toList(),
     );
 

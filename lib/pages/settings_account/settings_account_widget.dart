@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import '/components/button/button_widget.dart';
 import '/components/nav_menu_directory/nav_menu_directory_widget.dart';
 import '/components/settings_group/settings_group_widget.dart';
@@ -403,24 +404,34 @@ class _SettingsAccountWidgetState extends State<SettingsAccountWidget> {
                             EdgeInsetsDirectional.fromSTEB(0.0, 0.0, 0.0, 32.0),
                         child: Container(
                           child: Container(
-                            child: wrapWithModel(
-                              model: _model.buttonModel,
-                              updateCallback: () => safeSetState(() {}),
-                              child: ButtonWidget(
-                                icon: Icon(
-                                  Icons.logout_rounded,
-                                  color:
-                                      FlutterFlowTheme.of(context).primaryText,
-                                  size: 24.0,
+                            child: GestureDetector(
+                              onTap: () async {
+                                // Security phase 1: working sign-out. Clears
+                                // user-scoped app state, then the auth-state
+                                // listener flips AppStateNotifier.isLoggedIn and
+                                // the global router redirect lands on /login.
+                                FFAppState().selectedCareRecipient = null;
+                                await FirebaseAuth.instance.signOut();
+                              },
+                              child: wrapWithModel(
+                                model: _model.buttonModel,
+                                updateCallback: () => safeSetState(() {}),
+                                child: ButtonWidget(
+                                  icon: Icon(
+                                    Icons.logout_rounded,
+                                    color: FlutterFlowTheme.of(context)
+                                        .primaryText,
+                                    size: 24.0,
+                                  ),
+                                  iconPresent: true,
+                                  iconEndPresent: false,
+                                  content: 'Sign Out',
+                                  variant: 'outline',
+                                  size: 'medium',
+                                  fullWidth: true,
+                                  loading: false,
+                                  disabled: false,
                                 ),
-                                iconPresent: true,
-                                iconEndPresent: false,
-                                content: 'Sign Out',
-                                variant: 'outline',
-                                size: 'medium',
-                                fullWidth: true,
-                                loading: false,
-                                disabled: false,
                               ),
                             ),
                           ),

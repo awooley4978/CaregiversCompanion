@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
+import 'backend/auth/auth_service.dart';
 import 'backend/firebase/firebase_config.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import 'flutter_flow/flutter_flow_util.dart';
@@ -19,6 +20,12 @@ void main() async {
 
   final appState = FFAppState(); // Initialize FFAppState
   await appState.initializePersistedState();
+
+  // Security phase 1: start listening to Firebase Auth state before runApp so
+  // the router's global redirect is live as soon as the first frame renders.
+  // While the persisted session restores (authInitializing), the redirect
+  // stays put; after it resolves, signed-out users land on /login.
+  attachAuthStateListener(AppStateNotifier.instance);
 
   runApp(ChangeNotifierProvider(
     create: (context) => appState,
