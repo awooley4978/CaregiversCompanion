@@ -33,6 +33,9 @@ export 'schema/dashboard_notes_record.dart';
 export 'schema/iconname_record.dart';
 export 'schema/symptom_entries_record.dart';
 export 'schema/meal_entries_record.dart';
+export 'schema/organizations_record.dart';
+export 'schema/members_record.dart';
+export 'schema/invites_record.dart';
 
 /// Functions to query CareRecipientsRecords (as a Stream and as a Future).
 Future<int> queryCareRecipientsRecordCount({

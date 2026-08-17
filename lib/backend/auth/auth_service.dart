@@ -1,13 +1,19 @@
-// Auth foundation service (security phase 1).
+// Auth foundation service (security phase 1 + 2 hooks).
 //
-// Wires Firebase Auth into the app's router seam and owns the two
-// auth-adjacent behaviors this milestone ships:
+// Wires Firebase Auth into the app's router seam and owns the auth-adjacent
+// behaviors this milestone ships:
 //
 //  1. Auth state -> AppStateNotifier (isLoggedIn / authInitializing), which
 //     drives the global router redirect in lib/flutter_flow/nav/nav.dart.
 //  2. users/{uid} auto-provisioning on first successful sign-in
 //     (uid / name / email / createdAt, doc id == uid). Provider-agnostic and
 //     uid-centric: nothing provider-specific is stored on the profile (Q1).
+//  3. Security phase 2: on every sign-in, org membership is ensured
+//     (ensureOrgMembership — auto-provisions the family org on first
+//     sign-in, D5), pending invites addressed to the user's email are
+//     accepted, and the per-user persisted app state (selected recipient,
+//     activeGroupId context) is loaded into FFAppState. On sign-out the
+//     in-memory user-scoped state is cleared.
 //
 // Firestore rules and the data schema are intentionally untouched this phase.
 import 'dart:async';
@@ -15,6 +21,8 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '/app_state.dart';
+import '/backend/org/org_service.dart';
 import '/flutter_flow/nav/nav.dart';
 
 /// Starts listening to `FirebaseAuth.instance.authStateChanges()` and mirrors
@@ -32,10 +40,32 @@ StreamSubscription<User?> attachAuthStateListener(
   return FirebaseAuth.instance.authStateChanges().listen((user) {
     if (user != null) {
       // Fire-and-forget: provisioning must never block or fail the session.
-      unawaited(ensureUserProfile(user));
+      unawaited(_onSignedIn(user));
+    } else {
+      // Security phase 2: drop in-memory user-scoped state (selected
+      // recipient, active group context). Device-persisted per-user values
+      // are kept for the user's next sign-in (design §6.4).
+      FFAppState().clearUserScopedState();
     }
     appStateNotifier.updateAuthState(user != null);
   });
+}
+
+/// Runs the sequential post-sign-in setup: profile provisioning (phase 1),
+/// family-org membership (phase 2, D5), email-match invite acceptance
+/// (phase 2), and per-user persisted-state load. Each step is idempotent;
+/// any failure is contained so the session itself never breaks.
+Future<void> _onSignedIn(User user) async {
+  try {
+    await ensureUserProfile(user);
+    final orgId = await ensureOrgMembership(user);
+    FFAppState().activeGroupId = orgId;
+    await acceptInvitesForUser(user);
+    await FFAppState().initializePersistedStateForUser(user.uid);
+  } catch (_) {
+    // Never fail the session because of a provisioning/state error; all
+    // steps are retried on the next sign-in.
+  }
 }
 
 /// Auto-provisions the `users/{uid}` profile document on first successful

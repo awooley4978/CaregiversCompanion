@@ -21,6 +21,7 @@ import 'package:new_project/backend/auth/auth_service.dart';
 import 'package:new_project/flutter_flow/nav/nav.dart';
 import 'package:new_project/main.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'firebase_test_setup.dart';
 
@@ -31,11 +32,15 @@ void main() {
 
   setUpAll(() async {
     await initFirebaseForTest();
+    // Per-user persisted state (selected recipient, phase 2) is loaded from
+    // SharedPreferences on sign-in; the in-memory mock keeps it hermetic.
+    SharedPreferences.setMockInitialValues({});
   });
 
   setUp(() {
     // Cold start for every test: the auth restore has not resolved yet.
     AppStateNotifier.instance.resetAuthStateForTest();
+    FFAppState.reset();
   });
 
   tearDown(() {
