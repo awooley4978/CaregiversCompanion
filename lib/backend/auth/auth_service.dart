@@ -20,6 +20,11 @@ import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:google_sign_in_platform_interface/google_sign_in_platform_interface.dart'
+    show GoogleSignInExceptionCode;
 
 import '/app_state.dart';
 import '/backend/org/org_service.dart';
@@ -124,23 +129,65 @@ Future<void> ensureUserProfile(User user, {String? displayName}) async {
 
 /// Signs in with Google (the approved provider set: email/password + Google).
 ///
-/// Works on web once the owner enables the Google provider in the Firebase
-/// console. If the provider is disabled / the domain is not authorized the
-/// platform raises a [FirebaseAuthException] which the caller surfaces via
-/// [authErrorMessage]; on non-web platforms `signInWithPopup` is
-/// unimplemented, which is surfaced as a clean message rather than a crash.
+/// Platform-aware:
+///  * Web: `FirebaseAuth.signInWithPopup` with a `GoogleAuthProvider` — the
+///    Firebase-hosted Google dialog (unchanged).
+///  * iOS/Android: the native Google Sign-In SDK
+///    (`GoogleSignIn.instance.authenticate()`), exchanging the returned ID
+///    token for a Firebase credential via `signInWithCredential`. The native
+///    account sheet is the user-facing UI; dismissing it returns null and the
+///    login screen shows no error (silent abort).
+///  * Any other platform: throws [UnimplementedError], which
+///    [authErrorMessage] surfaces as a clean "not available" message rather
+///    than a crash (same behavior as the previous web-only flow).
+///
 /// Provider-agnostic account model (Q1): the resulting uid is all the app
-/// layer stores; nothing Google-specific is written to the user record.
+/// layer stores; nothing Google-specific is written to the user record. The
+/// uid flows through [_onSignedIn] (profile provisioning, org membership,
+/// invite acceptance, persisted state) exactly like the email/password flow.
 Future<User?> signInWithGoogle() async {
-  final credential =
-      await FirebaseAuth.instance.signInWithPopup(GoogleAuthProvider());
-  return credential.user;
+  if (kIsWeb) {
+    final credential =
+        await FirebaseAuth.instance.signInWithPopup(GoogleAuthProvider());
+    return credential.user;
+  }
+  if (defaultTargetPlatform == TargetPlatform.iOS ||
+      defaultTargetPlatform == TargetPlatform.android) {
+    try {
+      final googleAccount = await GoogleSignIn.instance.authenticate();
+      final googleAuth = googleAccount.authentication;
+      final credential =
+          GoogleAuthProvider.credential(idToken: googleAuth.idToken);
+      final userCredential =
+          await FirebaseAuth.instance.signInWithCredential(credential);
+      return userCredential.user;
+    } on GoogleSignInException catch (e) {
+      // The user dismissed the account sheet, or the flow was interrupted
+      // (e.g. the app was backgrounded) — a normal abort, not an error.
+      // Swallow it so the login screen stays silent.
+      if (e.code == GoogleSignInExceptionCode.canceled ||
+          e.code == GoogleSignInExceptionCode.interrupted) {
+        return null;
+      }
+      // Real failures (configuration / network / unknown) propagate so
+      // [authErrorMessage] can surface a clear message.
+      rethrow;
+    }
+  }
+  // Desktop / other platforms: clean "not available" message, never a crash.
+  throw UnimplementedError('Google sign-in is not available on this device yet.');
 }
 
 /// Human-readable message for auth-form inline errors.
-String authErrorMessage(Object error) {
+///
+/// Returns null when the error is a user abort (e.g. dismissing the Google
+/// account sheet) — the login screen then shows no error at all.
+String? authErrorMessage(Object error) {
   if (error is FirebaseAuthException) {
     switch (error.code) {
+      case 'canceled':
+        // User closed the Google sign-in flow — no error to show.
+        return null;
       case 'invalid-email':
         return 'Enter a valid email address.';
       case 'user-disabled':
@@ -166,6 +213,20 @@ String authErrorMessage(Object error) {
       case 'account-exists-with-different-credential':
         return 'An account already exists for this email using a different sign-in method.';
       default:
+        return 'Sign-in failed. Please try again.';
+    }
+  }
+  if (error is GoogleSignInException) {
+    switch (error.code) {
+      case GoogleSignInExceptionCode.canceled:
+      case GoogleSignInExceptionCode.interrupted:
+        // User aborted the native Google sheet — silent.
+        return null;
+      case GoogleSignInExceptionCode.clientConfigurationError:
+      case GoogleSignInExceptionCode.providerConfigurationError:
+        return 'Google sign-in is not configured for this device yet — use email and password.';
+      default:
+        // unknownError, uiUnavailable, userMismatch, future codes.
         return 'Sign-in failed. Please try again.';
     }
   }
