@@ -162,6 +162,11 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
           builder: (context, params) => SettingsAccountWidget(),
         ),
         FFRoute(
+          name: HouseholdWidget.routeName,
+          path: HouseholdWidget.routePath,
+          builder: (context, params) => HouseholdWidget(),
+        ),
+        FFRoute(
           name: CalendarPageWidget.routeName,
           path: CalendarPageWidget.routePath,
           builder: (context, params) => CalendarPageWidget(),

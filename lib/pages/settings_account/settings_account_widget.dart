@@ -10,6 +10,7 @@ import '/flutter_flow/flutter_flow_icon_button.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/flutter_flow_widgets.dart';
+import '/pages/group/household_widget.dart' show HouseholdWidget;
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -389,6 +390,62 @@ class _SettingsAccountWidgetState extends State<SettingsAccountWidget> {
                         child: SettingsGroupWidget(
                           title: 'SECURITY',
                           child: () => SettingsGroupChild3Widget(),
+                        ),
+                      ),
+                      Padding(
+                        padding:
+                            EdgeInsetsDirectional.fromSTEB(0.0, 0.0, 0.0, 16.0),
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(16.0),
+                            onTap: () =>
+                                context.go(HouseholdWidget.routePath),
+                            child: Container(
+                              padding: EdgeInsetsDirectional.fromSTEB(
+                                  20.0, 16.0, 20.0, 16.0),
+                              decoration: BoxDecoration(
+                                color: FlutterFlowTheme.of(context)
+                                    .secondaryBackground,
+                                borderRadius: BorderRadius.circular(16.0),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.max,
+                                children: [
+                                  Icon(
+                                    Icons.family_restroom_rounded,
+                                    color: FlutterFlowTheme.of(context).primary,
+                                  ),
+                                  SizedBox(width: 16.0),
+                                  Expanded(
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Household',
+                                          style: FlutterFlowTheme.of(context)
+                                              .titleMedium,
+                                        ),
+                                        Text(
+                                          'Members, invites, and roles in '
+                                          'your Care Circle',
+                                          style: FlutterFlowTheme.of(context)
+                                              .bodySmall,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Icon(
+                                    Icons.chevron_right_rounded,
+                                    color: FlutterFlowTheme.of(context)
+                                        .secondaryText,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                         ),
                       ),
                       wrapWithModel(
