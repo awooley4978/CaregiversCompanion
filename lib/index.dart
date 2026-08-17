@@ -18,4 +18,6 @@ export '/pages/i_emergency_information/i_emergency_information_widget.dart'
     show IEmergencyInformationWidget;
 export '/pages/settings_account/settings_account_widget.dart'
     show SettingsAccountWidget;
+export '/pages/auth/login_widget.dart' show AuthLoginWidget;
+export '/pages/auth/signup_widget.dart' show AuthSignupWidget;
 export '/calendar_page/calendar_page_widget.dart' show CalendarPageWidget;
