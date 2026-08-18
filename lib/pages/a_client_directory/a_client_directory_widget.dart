@@ -1,4 +1,5 @@
 import '/backend/backend.dart';
+import '/backend/org/org_service.dart';
 import '/components/client_card/client_card_widget.dart';
 import '/components/nav_menu_directory/nav_menu_directory_widget.dart';
 import '/flutter_flow/flutter_flow_icon_button.dart';
@@ -315,7 +316,7 @@ class _AClientDirectoryWidgetState extends State<AClientDirectoryWidget> {
                               ),
                             ),
                             StreamBuilder<List<CareRecipientsRecord>>(
-                              stream: queryCareRecipientsRecord(),
+                              stream: careRecipientsForActiveGroup(),
                               builder: (context, snapshot) {
                                 // Customize what your widget looks like when it's loading.
                                 if (!snapshot.hasData) {
