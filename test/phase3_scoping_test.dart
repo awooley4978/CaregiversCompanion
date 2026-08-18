@@ -105,11 +105,14 @@ void main() {
       expect(record.name, 'MW');
       expect(record.orgId, ''); // null-safe fallback, no crash
       expect(record.hasOrgId(), isFalse);
+      expect(record.migrationStatus, ''); // same fallback for legacy docs
+      expect(record.hasMigrationStatus(), isFalse);
     });
   });
 
   group('careRecipients create (verified orgId)', () {
-    test('create writes orgId = the user\'s verified active group', () async {
+    test('create writes orgId + migrationStatus=created from the verified '
+        'active group', () async {
       await provision('u1', email: 'founder@example.com');
 
       await createCareRecipientForActiveGroup(
@@ -126,6 +129,7 @@ void main() {
           .toList();
       expect(created.length, 1);
       expect(created.single.value['orgId'], 'org_u1');
+      expect(created.single.value['migrationStatus'], 'created');
       expect(created.single.value['Name'], 'Ada');
       expect(created.single.value['PrimaryCondition'], 'Diabetes');
     });
@@ -202,7 +206,7 @@ void main() {
       expect(list.single.patientRef?.path, 'careRecipients/r1');
       // No orgId anywhere in the read path — the record class has no orgId
       // field and the stream never throws for the legacy doc.
-      expect(() => SymptomEntriesRecord.fromSnapshot(
+      expect(() async => SymptomEntriesRecord.fromSnapshot(
               await SymptomEntriesRecord.collection.doc('s1').get()),
           returnsNormally);
     });

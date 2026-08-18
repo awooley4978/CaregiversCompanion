@@ -50,6 +50,14 @@ const String kRoleViewer = 'viewer';
 const String kMemberStatusActive = 'active';
 const String kMemberStatusInvited = 'invited';
 
+/// migrationStatus values (design §5.1(c).5): 'claimed' = migrated legacy
+/// doc, 'created' = new post-migration doc (the app writes this), 'unclaimed'
+/// = legacy before claim. Read by the app only for UI hints; Phase-4 rules
+/// ignore the field.
+const String kMigrationStatusClaimed = 'claimed';
+const String kMigrationStatusCreated = 'created';
+const String kMigrationStatusUnclaimed = 'unclaimed';
+
 /// Roles that may be assigned via invite (owner is never inviteable).
 const Set<String> kInviteableRoles = {kRoleAdmin, kRoleCaregiver, kRoleViewer};
 
@@ -345,8 +353,18 @@ Future<DocumentReference<Map<String, dynamic>>> createCareRecipientForActiveGrou
         'Your membership in this care circle could not be verified, so the '
         'profile was not saved.');
   }
-  final ref = CareRecipientsRecord.collection.doc();
-  await ref.set({...data, 'orgId': orgId});
+  // Go through FirebaseFirestore directly (NOT the record's raw-typed
+  // `collection` getter) so the reference is DocumentReference<Map<String,
+  // dynamic>> and matches the declared return type.
+  final ref = FirebaseFirestore.instance.collection('careRecipients').doc();
+  await ref.set({
+    ...data,
+    'orgId': orgId,
+    // §5.1(c).5: the app writes 'created' on every NEW doc (rules ignore it;
+    // read by the app only for UI hints). Legacy docs get 'claimed' from the
+    // one-time claim script (scripts/claim_legacy_data.dart).
+    'migrationStatus': kMigrationStatusCreated,
+  });
   return ref;
 }
 

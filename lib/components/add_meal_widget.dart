@@ -277,9 +277,22 @@ class _AddMealWidgetState extends State<AddMealWidget> {
                 hoverColor: Colors.transparent,
                 highlightColor: Colors.transparent,
                 onTap: () async {
+                  // §5.2 item 5: never write a null patientRef — gate on a
+                  // valid selection (the Phase-4 create rule requires the ref
+                  // to be a real, accessible recipient).
+                  final selected = FFAppState().selectedCareRecipient;
+                  if (selected == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                            'Select a care recipient to save this meal.'),
+                      ),
+                    );
+                    return;
+                  }
                   await MealEntriesRecord.collection.doc().set({
                     ...createMealEntriesRecordData(
-                      patientRef: FFAppState().selectedCareRecipient,
+                      patientRef: selected,
                       mealType: widget!.mealType,
                       mealName: widget!.mealName,
                       amountEaten: widget!.amount,

@@ -121,6 +121,15 @@ class CareRecipientsRecord extends FirestoreRecord {
   String get orgId => _orgId ?? '';
   bool hasOrgId() => _orgId != null;
 
+  // "migrationStatus" field (security phase 3, design §5.1(c).5): 'created'
+  // on new docs (app-written), 'claimed' on migrated legacy docs (one-time
+  // claim script), 'unclaimed'/absent on pre-claim legacy docs. Read by the
+  // app only for UI hints; Phase-4 rules ignore it. Getter falls back to ''
+  // so legacy docs never crash the read path.
+  String? _migrationStatus;
+  String get migrationStatus => _migrationStatus ?? '';
+  bool hasMigrationStatus() => _migrationStatus != null;
+
   void _initializeFields() {
     _name = snapshotData['Name'] as String?;
     _conditions = getDataList(snapshotData['Conditions']);
@@ -144,6 +153,7 @@ class CareRecipientsRecord extends FirestoreRecord {
     _tracksMealsHydration = snapshotData['TracksMealsHydration'] as bool?;
     _dateOfBirth = snapshotData['DateOfBirth'] as String?;
     _orgId = snapshotData['orgId'] as String?;
+    _migrationStatus = snapshotData['migrationStatus'] as String?;
   }
 
   static CollectionReference get collection =>
@@ -199,6 +209,7 @@ Map<String, dynamic> createCareRecipientsRecordData({
   bool? tracksMealsHydration,
   String? dateOfBirth,
   String? orgId,
+  String? migrationStatus,
 }) {
   final firestoreData = mapToFirestore(
     <String, dynamic>{
@@ -220,6 +231,7 @@ Map<String, dynamic> createCareRecipientsRecordData({
       'TracksMealsHydration': tracksMealsHydration,
       'DateOfBirth': dateOfBirth,
       'orgId': orgId,
+      'migrationStatus': migrationStatus,
     }.withoutNulls,
   );
 
@@ -252,7 +264,8 @@ class CareRecipientsRecordDocumentEquality
         e1?.trackSymptoms == e2?.trackSymptoms &&
         e1?.tracksMealsHydration == e2?.tracksMealsHydration &&
         e1?.dateOfBirth == e2?.dateOfBirth &&
-        e1?.orgId == e2?.orgId;
+        e1?.orgId == e2?.orgId &&
+        e1?.migrationStatus == e2?.migrationStatus;
   }
 
   @override
@@ -276,7 +289,8 @@ class CareRecipientsRecordDocumentEquality
         e?.trackSymptoms,
         e?.tracksMealsHydration,
         e?.dateOfBirth,
-        e?.orgId
+        e?.orgId,
+        e?.migrationStatus
       ]);
 
   @override

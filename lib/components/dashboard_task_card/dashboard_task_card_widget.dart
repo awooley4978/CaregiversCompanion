@@ -133,9 +133,23 @@ class _DashboardTaskCardWidgetState extends State<DashboardTaskCardWidget> {
                       hoverColor: Colors.transparent,
                       highlightColor: Colors.transparent,
                       onTap: () async {
-                        await CarechecklistRecord.createDoc(
-                                FFAppState().selectedCareRecipient!)
-                            .set({
+                        // §5.2 item 4: only act when a valid recipient is
+                        // selected — the carechecklist doc lives in the
+                        // recipient's subcollection, so a null selection
+                        // would crash (null assert) and is denied by the
+                        // Phase-4 rules anyway (null parent fails the gate).
+                        final selected =
+                            FFAppState().selectedCareRecipient;
+                        if (selected == null) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                  'Select a care recipient to add this task.'),
+                            ),
+                          );
+                          return;
+                        }
+                        await CarechecklistRecord.createDoc(selected).set({
                           ...createCarechecklistRecordData(
                             title: widget!.title,
                             subtitle: widget!.subtitle,

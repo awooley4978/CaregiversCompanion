@@ -15,16 +15,17 @@
 //                        dart run scripts/claim_legacy_data.dart <ownerUid>
 //
 // WHAT IT DOES
-//   * Sets ONLY orgId = 'org_<ownerUid>' on the backed-up careRecipients docs
-//     (the single field the approved design writes; no migrationStatus, no
-//     other fields — "sets ONLY orgId" per the phase-3 brief).
-//   * The 1 symptomEntries doc is CHILD data: per design §5.1 it needs NO
-//     orgId — it becomes visible automatically once its recipient is claimed
-//     (rules derive access from the recipient's orgId). The script
+//   * Sets orgId = 'org_<ownerUid>' AND migrationStatus = 'claimed' on the
+//     backed-up careRecipients docs (design §5.1(c).2 — the claim writes BOTH
+//     fields; §5.1(c).5: 'claimed' = migrated legacy doc). No other fields.
+//   * The 1 symptomEntries doc is CHILD data: per design §5.1(c).3 it needs
+//     NO orgId — it becomes visible automatically once its recipient is
+//     claimed (rules derive access from the recipient's orgId). The script
 //     cross-checks that the symptom doc's patientRef points at one of the
 //     claimed recipients and reports "follows automatically" WITHOUT writing.
 //   * Prints a before/after diff for every doc it touches. Idempotent:
-//     already-claimed docs are reported and skipped.
+//     already-claimed docs are reported and skipped; a doc already owned by a
+//     DIFFERENT org is never overwritten.
 //
 // AUTH (no service account, no SDK)
 //   * Signs in as the OWNER via the Firebase Auth REST API
@@ -41,10 +42,10 @@
 // SAFETY
 //   * Refuses to run without a readable backup dir.
 //   * Dry-run makes NO network calls at all.
-//   * In run mode every write is a single-field PATCH (updateMask=orgId);
-//     if the live doc no longer exists, it is skipped with a warning
-//     (never recreated). If the live doc already has orgId, it is skipped
-//     (idempotent).
+//   * In run mode every write is a two-field PATCH (updateMask=orgId +
+//     migrationStatus); if the live doc no longer exists, it is skipped with
+//     a warning (never recreated). A doc already carrying orgId +
+//     migrationStatus='claimed' is skipped (idempotent).
 //
 // Environment: pure dart:io + dart:convert — no packages, no Flutter.
 import 'dart:convert';
@@ -53,6 +54,11 @@ import 'dart:io';
 const String kApiKey = 'AIzaSyDmnxlcnPGXUi4Sj1T7cbewRdgG9pB_4-k';
 const String kProjectId = 'carerecipients';
 const String kDefaultBackupDir = 'legacy-backup-20260818-001046';
+/// The org id prefix — MUST match org_service.autoFamilyOrgId (=> 'org_$uid')
+/// so the claimed org is exactly the one the owner's app auto-provisions.
+const String kOrgPrefix = 'org_';
+/// migrationStatus value written by this claim (design §5.1(c).5).
+const String kMigrationStatusClaimed = 'claimed';
 const String kDocBase =
     'https://firestore.googleapis.com/v1/projects/$kProjectId/'
     'databases/(default)/documents';
@@ -119,10 +125,12 @@ void main(List<String> args) async {
 
   if (dryRun) {
     stdout.writeln();
-    stdout.writeln('DRY-RUN — would PATCH (single field, updateMask=orgId):');
+    stdout.writeln('DRY-RUN — would PATCH (two fields, '
+        'updateMask=orgId,migrationStatus):');
     for (final r in recipients) {
       stdout.writeln('  PATCH careRecipients/${r['id']}');
       stdout.writeln('    orgId: (absent) -> $orgId');
+      stdout.writeln('    migrationStatus: (absent) -> $kMigrationStatusClaimed');
     }
     stdout.writeln();
     stdout.writeln('No network calls were made. Review this output against the '
@@ -366,8 +374,9 @@ Future<void> _preflight(String ownerUid, String orgId, String token) async {
   }
 }
 
-/// Claims a single recipient: GET before -> PATCH orgId -> GET after.
-/// Returns 'patched', 'skipped' (already has orgId / doc gone).
+/// Claims a single recipient: GET before -> PATCH orgId + migrationStatus ->
+/// GET after. Returns 'patched', or 'skipped' (already claimed, doc gone, or
+/// owned by a DIFFERENT org — never overwritten).
 Future<String> _claimOne(String id, String orgId, String token) async {
   final url = '$kDocBase/careRecipients/$id';
   final before = await _getJson(url, token: token);
@@ -380,18 +389,33 @@ Future<String> _claimOne(String id, String orgId, String token) async {
   final currentOrgId = fields['orgId'] is Map<String, dynamic>
       ? (fields['orgId'] as Map<String, dynamic>)['stringValue']
       : null;
+  final currentStatus = fields['migrationStatus'] is Map<String, dynamic>
+      ? (fields['migrationStatus'] as Map<String, dynamic>)['stringValue']
+      : null;
   if (currentOrgId != null && currentOrgId.isNotEmpty) {
-    stdout.writeln('  SKIP careRecipients/$id: already claimed (orgId='
-        '$currentOrgId).');
-    return 'skipped';
+    if (currentOrgId != orgId) {
+      stdout.writeln('  SKIP careRecipients/$id: already owned by '
+          '"$currentOrgId" (not $orgId) — never overwrite.');
+      return 'skipped';
+    }
+    if (currentStatus == kMigrationStatusClaimed) {
+      stdout.writeln('  SKIP careRecipients/$id: already claimed '
+          '(orgId=$currentOrgId, migrationStatus=claimed).');
+      return 'skipped';
+    }
   }
 
   stdout.writeln('  PATCH careRecipients/$id');
-  stdout.writeln('    orgId: (absent) -> $orgId');
+  stdout.writeln('    orgId: ${currentOrgId ?? '(absent)'} -> $orgId');
+  stdout.writeln('    migrationStatus: ${currentStatus ?? '(absent)'} -> '
+      '$kMigrationStatusClaimed');
   final patched = await _patchJson(
-    '$url?updateMask.fieldPaths=orgId',
+    '$url?updateMask.fieldPaths=orgId&updateMask.fieldPaths=migrationStatus',
     {
-      'fields': {'orgId': {'stringValue': orgId}},
+      'fields': {
+        'orgId': {'stringValue': orgId},
+        'migrationStatus': {'stringValue': kMigrationStatusClaimed},
+      },
     },
     token: token,
   );
@@ -404,8 +428,14 @@ Future<String> _claimOne(String id, String orgId, String token) async {
   final afterOrgId = afterFields['orgId'] is Map<String, dynamic>
       ? (afterFields['orgId'] as Map<String, dynamic>)['stringValue']
       : null;
-  stdout.writeln('    after: orgId=${afterOrgId ?? '(missing)'} — '
-      '${afterOrgId == orgId ? 'OK' : 'UNEXPECTED VALUE, review!'}');
+  final afterStatus = afterFields['migrationStatus'] is Map<String, dynamic>
+      ? (afterFields['migrationStatus'] as Map<String, dynamic>)['stringValue']
+      : null;
+  stdout.writeln('    after: orgId=${afterOrgId ?? '(missing)'}, '
+      'migrationStatus=${afterStatus ?? '(missing)'} — '
+      '${afterOrgId == orgId && afterStatus == kMigrationStatusClaimed
+          ? 'OK'
+          : 'UNEXPECTED VALUE, review!'}');
   return 'patched';
 }
 
@@ -416,7 +446,8 @@ Usage:
                                            [--backup-dir <path>]
 
   <ownerUid>    the owner's Firebase uid (shown in the app after first
-                sign-in); the claim writes orgId = 'org_<ownerUid>'.
+                sign-in); the claim writes orgId = 'org_<ownerUid>' +
+                migrationStatus = 'claimed'.
   --dry-run     offline: print the exact PATCHes without sending anything.
   --backup-dir  path to the backup dump (default:
                 legacy-backup-20260818-001046 relative to CWD).
