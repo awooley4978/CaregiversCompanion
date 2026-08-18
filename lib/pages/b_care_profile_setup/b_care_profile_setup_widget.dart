@@ -1,4 +1,5 @@
 import '/backend/backend.dart';
+import '/backend/org/org_service.dart';
 import '/components/button/button_widget.dart';
 import '/components/condition_chip/condition_chip_widget.dart';
 import '/components/module_toggle/module_toggle_widget.dart';
@@ -10,6 +11,7 @@ import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/flutter_flow_widgets.dart';
 import 'dart:ui';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -806,9 +808,21 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
                               hoverColor: Colors.transparent,
                               highlightColor: Colors.transparent,
                               onTap: () async {
-                                await CareRecipientsRecord.collection
-                                    .doc()
-                                    .set(createCareRecipientsRecordData(
+                                final uid =
+                                    FirebaseAuth.instance.currentUser?.uid;
+                                if (uid == null) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                          'Sign in to save a care recipient.'),
+                                    ),
+                                  );
+                                  return;
+                                }
+                                try {
+                                  await createCareRecipientForActiveGroup(
+                                    uid: uid,
+                                    data: createCareRecipientsRecordData(
                                       name: _model.textFieldNameModel
                                           .inputTextController.text,
                                       primaryCondition: _model
@@ -835,15 +849,23 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
                                           .switchModel.switchValue,
                                       trackGlucose: _model.moduleToggleModel2
                                           .switchModel.switchValue,
-                                      trackMedication: _model.moduleToggleModel3
-                                          .switchModel.switchValue,
+                                      trackMedication: _model
+                                          .moduleToggleModel3
+                                          .switchModel
+                                          .switchValue,
                                       trackSymptoms: _model.moduleToggleModel4
                                           .switchModel.switchValue,
                                       tracksMealsHydration: _model
                                           .moduleToggleModel5
                                           .switchModel
                                           .switchValue,
-                                    ));
+                                    ),
+                                  );
+                                } on OrgAccessDeniedException catch (e) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text(e.message)),
+                                  );
+                                }
                               },
                               child: wrapWithModel(
                                 model: _model.buttonModel,

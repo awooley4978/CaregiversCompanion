@@ -13,6 +13,20 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "symptomEntries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "patientRef",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "timeLogged",
+          "order": "DESCENDING"
+        }
+      ]
     }
   ]
 }
