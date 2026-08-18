@@ -112,6 +112,15 @@ class CareRecipientsRecord extends FirestoreRecord {
   String get dateOfBirth => _dateOfBirth ?? '';
   bool hasDateOfBirth() => _dateOfBirth != null;
 
+  // "orgId" field (security phase 3 — the owning org; set at create from the
+  // user's VERIFIED active group id, see org_service. Legacy/unclaimed docs
+  // have no orgId; the getter falls back to '' so the read path never
+  // crashes on pre-claim docs (design §5.1 Path B). Phase-4 rules derive
+  // access from this field — every careRecipients doc must carry it).
+  String? _orgId;
+  String get orgId => _orgId ?? '';
+  bool hasOrgId() => _orgId != null;
+
   void _initializeFields() {
     _name = snapshotData['Name'] as String?;
     _conditions = getDataList(snapshotData['Conditions']);
@@ -134,6 +143,7 @@ class CareRecipientsRecord extends FirestoreRecord {
     _trackSymptoms = snapshotData['TrackSymptoms'] as bool?;
     _tracksMealsHydration = snapshotData['TracksMealsHydration'] as bool?;
     _dateOfBirth = snapshotData['DateOfBirth'] as String?;
+    _orgId = snapshotData['orgId'] as String?;
   }
 
   static CollectionReference get collection =>
@@ -188,6 +198,7 @@ Map<String, dynamic> createCareRecipientsRecordData({
   bool? trackSymptoms,
   bool? tracksMealsHydration,
   String? dateOfBirth,
+  String? orgId,
 }) {
   final firestoreData = mapToFirestore(
     <String, dynamic>{
@@ -208,6 +219,7 @@ Map<String, dynamic> createCareRecipientsRecordData({
       'TrackSymptoms': trackSymptoms,
       'TracksMealsHydration': tracksMealsHydration,
       'DateOfBirth': dateOfBirth,
+      'orgId': orgId,
     }.withoutNulls,
   );
 
@@ -239,7 +251,8 @@ class CareRecipientsRecordDocumentEquality
         e1?.trackMedication == e2?.trackMedication &&
         e1?.trackSymptoms == e2?.trackSymptoms &&
         e1?.tracksMealsHydration == e2?.tracksMealsHydration &&
-        e1?.dateOfBirth == e2?.dateOfBirth;
+        e1?.dateOfBirth == e2?.dateOfBirth &&
+        e1?.orgId == e2?.orgId;
   }
 
   @override
@@ -262,7 +275,8 @@ class CareRecipientsRecordDocumentEquality
         e?.trackMedication,
         e?.trackSymptoms,
         e?.tracksMealsHydration,
-        e?.dateOfBirth
+        e?.dateOfBirth,
+        e?.orgId
       ]);
 
   @override

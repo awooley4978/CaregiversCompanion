@@ -28,6 +28,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '/app_state.dart';
+import '/backend/backend.dart';
 import '/backend/schema/invites_record.dart';
 import '/backend/schema/members_record.dart';
 import '/backend/schema/organizations_record.dart';
@@ -247,6 +248,106 @@ Future<bool> setActiveGroupId(String uid, String orgId) async {
       .set({'activeGroupId': orgId}, SetOptions(merge: true));
   FFAppState().activeGroupId = orgId;
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 — org-scoped careRecipients access (D1: context is a selector,
+// rules verify; child data stays recipient-scoped, no orgId on child docs)
+// ---------------------------------------------------------------------------
+
+/// THE single shared careRecipients list stream for the app (phase 3).
+///
+/// Every careRecipients collection query must go through this helper (or add
+/// the identical `where('orgId', isEqualTo: activeGroupId)` filter): an
+/// unscoped read would mix other orgs' recipients into the UI today and is
+/// denied outright under the Phase-4 rules.
+///
+/// The filter value is the CACHED activeGroupId (FFAppState). The cache is
+/// only ever set after a VERIFIED membership check (`ensureOrgMembership` /
+/// `setActiveGroupId` — D1), and the Phase-4 rules independently verify
+/// membership AND the doc's orgId on every request, so relying on the cache
+/// as the *selector* is safe. Returns an EMPTY stream (never a raw unscoped
+/// query) when there is no group context — signed out, or a profile that
+/// never resolved one.
+Stream<List<CareRecipientsRecord>> careRecipientsForActiveGroup({
+  Query Function(Query)? queryBuilder,
+  int limit = -1,
+}) {
+  final orgId = FFAppState().activeGroupId;
+  if (orgId == null || orgId.isEmpty) {
+    return Stream.value(const []);
+  }
+  return queryCareRecipientsRecord(
+    queryBuilder: (q) {
+      final scoped = q.where('orgId', isEqualTo: orgId);
+      return queryBuilder == null ? scoped : queryBuilder(scoped);
+    },
+    limit: limit,
+  );
+}
+
+/// Recipient-scoped symptomEntries stream for the SELECTED recipient.
+///
+/// Child data (symptomEntries, careNotes, mealEntries, carechecklist, ...)
+/// stays recipient-scoped — NO orgId field on child docs; Phase-4 rules
+/// derive access from the recipient's orgId. This fixes the dashboard's
+/// cross-recipient-mix bug (audit part 3 item 7) AND the unscoped read that
+/// Phase-4 rules would deny.
+///
+/// Returns an empty stream when no recipient is selected — the data layer
+/// must never build `where('patientRef', isEqualTo: null)` (a null-selection
+/// UI gate is an audit-fix workstream item).
+Stream<List<SymptomEntriesRecord>> symptomEntriesForSelectedRecipient({
+  Query Function(Query)? queryBuilder,
+  int limit = -1,
+}) {
+  final selected = FFAppState().selectedCareRecipient;
+  if (selected == null) {
+    return Stream.value(const []);
+  }
+  return querySymptomEntriesRecord(
+    queryBuilder: (q) {
+      final scoped = q.where('patientRef', isEqualTo: selected);
+      return queryBuilder == null ? scoped : queryBuilder(scoped);
+    },
+    limit: limit,
+  );
+}
+
+/// Creates a careRecipients doc in [uid]'s VERIFIED active group (phase 3).
+///
+/// The orgId is resolved from `users/{uid}.activeGroupId` — read FRESH, never
+/// the in-memory cache alone for a WRITE — and the caller's active membership
+/// in that org is verified BEFORE the write (the app-layer mirror of the
+/// Phase-4 create rule). An unverified create is refused with a clean
+/// [OrgAccessDeniedException] so the UI can show a real message instead of a
+/// silent failure (which is what an unscoped create would be once rules
+/// flip).
+///
+/// [data] is the caller's `createCareRecipientsRecordData(...)` map WITHOUT
+/// orgId; this function adds orgId after verification so no future caller can
+/// forget it. Returns the created document reference.
+Future<DocumentReference<Map<String, dynamic>>> createCareRecipientForActiveGroup({
+  required String uid,
+  required Map<String, dynamic> data,
+}) async {
+  if (uid.isEmpty) {
+    throw OrgAccessDeniedException('Sign in to save a care recipient.');
+  }
+  final orgId = await getActiveGroupId(uid);
+  if (orgId == null || orgId.isEmpty) {
+    throw OrgAccessDeniedException(
+        'No active care circle yet — sign in once so your care circle is '
+        'created, then tap Save Profile again.');
+  }
+  if (!await isActiveMember(orgId, uid)) {
+    throw OrgAccessDeniedException(
+        'Your membership in this care circle could not be verified, so the '
+        'profile was not saved.');
+  }
+  final ref = CareRecipientsRecord.collection.doc();
+  await ref.set({...data, 'orgId': orgId});
+  return ref;
 }
 
 // ---------------------------------------------------------------------------
