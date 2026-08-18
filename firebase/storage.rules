@@ -1,12 +1,21 @@
 rules_version = '2';
+// Caregivers Companion — Cloud Storage rules (SECURITY PHASE 4 alignment, §4.4).
+//
+// The app does NOT use Cloud Storage (no storage bucket referenced anywhere in
+// the app or the audit) — this file is inert today. It existed in the repo with
+// the users/{userId}/** shape and is ALIGNED here to deny-by-default:
+//   * reads under users/{userId} were `if true` (public) -> now owner-only.
+//   * the catch-all deny remains the fallback for everything else.
+// The users/{userId}/** shape is retained for future uploads (§4.4); photo
+// uploads keyed per org (organizations/{orgId}/...) are a later decision made
+// when uploads are actually implemented.
 service firebase.storage {
   match /b/{bucket}/o {
+    match /users/{userId}/{allPaths=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
     match /{allPaths=**} {
       allow read, write: if false;
-    }
-    match /users/{userId}/{allPaths=**} {
-      allow read: if true;
-      allow write: if request.auth.uid == userId;
     }
   }
 }
