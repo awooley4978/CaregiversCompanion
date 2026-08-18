@@ -1,4 +1,5 @@
 import '/backend/backend.dart';
+import '/backend/org/org_service.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/flutter_flow_widgets.dart';
@@ -72,7 +73,7 @@ class _PatentPickerSheetWidgetState extends State<PatentPickerSheetWidget> {
                 color: FlutterFlowTheme.of(context).alternate,
               ),
               StreamBuilder<List<CareRecipientsRecord>>(
-                stream: queryCareRecipientsRecord(),
+                stream: careRecipientsForActiveGroup(),
                 builder: (context, snapshot) {
                   // Customize what your widget looks like when it's loading.
                   if (!snapshot.hasData) {

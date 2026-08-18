@@ -1,4 +1,5 @@
 import '/backend/backend.dart';
+import '/backend/org/org_service.dart';
 import '/components/add_meal_widget.dart';
 import '/components/button/button_widget.dart';
 import '/components/dashboard_notes_form/dashboard_notes_form_widget.dart';
@@ -174,7 +175,7 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                             crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
                               StreamBuilder<List<CareRecipientsRecord>>(
-                                stream: queryCareRecipientsRecord(),
+                                stream: careRecipientsForActiveGroup(),
                                 builder: (context, snapshot) {
                                   // Customize what your widget looks like when it's loading.
                                   if (!snapshot.hasData) {
@@ -738,11 +739,12 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                       ),
                                     ),
                                     StreamBuilder<List<SymptomEntriesRecord>>(
-                                      stream: querySymptomEntriesRecord(
-                                        queryBuilder: (symptomEntriesRecord) =>
-                                            symptomEntriesRecord.orderBy(
-                                                'timeLogged',
-                                                descending: true),
+                                      stream: symptomEntriesForSelectedRecipient(
+                                        queryBuilder:
+                                            (symptomEntriesRecord) =>
+                                                symptomEntriesRecord.orderBy(
+                                                    'timeLogged',
+                                                    descending: true),
                                       ),
                                       builder: (context, snapshot) {
                                         // Customize what your widget looks like when it's loading.

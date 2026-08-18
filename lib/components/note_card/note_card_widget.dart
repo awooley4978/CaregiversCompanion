@@ -409,10 +409,26 @@ class _NoteCardWidgetState extends State<NoteCardWidget> {
                               ),
                               FFButtonWidget(
                                 onPressed: () async {
+                                  // §5.2 item 5: never write a null
+                                  // careRecipientRef — gate on a valid
+                                  // selection (the Phase-4 create rule
+                                  // requires the ref to be a real,
+                                  // accessible recipient).
+                                  final selected =
+                                      FFAppState().selectedCareRecipient;
+                                  if (selected == null) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                            'Select a care recipient to save '
+                                            'this note.'),
+                                      ),
+                                    );
+                                    return;
+                                  }
                                   await CareNotesRecord.collection.doc().set({
                                     ...createCareNotesRecordData(
-                                      careRecipientRef:
-                                          FFAppState().selectedCareRecipient,
+                                      careRecipientRef: selected,
                                       noteText: widget!.content,
                                       createdBy: widget!.authorName,
                                     ),

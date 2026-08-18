@@ -112,6 +112,24 @@ class CareRecipientsRecord extends FirestoreRecord {
   String get dateOfBirth => _dateOfBirth ?? '';
   bool hasDateOfBirth() => _dateOfBirth != null;
 
+  // "orgId" field (security phase 3 — the owning org; set at create from the
+  // user's VERIFIED active group id, see org_service. Legacy/unclaimed docs
+  // have no orgId; the getter falls back to '' so the read path never
+  // crashes on pre-claim docs (design §5.1 Path B). Phase-4 rules derive
+  // access from this field — every careRecipients doc must carry it).
+  String? _orgId;
+  String get orgId => _orgId ?? '';
+  bool hasOrgId() => _orgId != null;
+
+  // "migrationStatus" field (security phase 3, design §5.1(c).5): 'created'
+  // on new docs (app-written), 'claimed' on migrated legacy docs (one-time
+  // claim script), 'unclaimed'/absent on pre-claim legacy docs. Read by the
+  // app only for UI hints; Phase-4 rules ignore it. Getter falls back to ''
+  // so legacy docs never crash the read path.
+  String? _migrationStatus;
+  String get migrationStatus => _migrationStatus ?? '';
+  bool hasMigrationStatus() => _migrationStatus != null;
+
   void _initializeFields() {
     _name = snapshotData['Name'] as String?;
     _conditions = getDataList(snapshotData['Conditions']);
@@ -134,6 +152,8 @@ class CareRecipientsRecord extends FirestoreRecord {
     _trackSymptoms = snapshotData['TrackSymptoms'] as bool?;
     _tracksMealsHydration = snapshotData['TracksMealsHydration'] as bool?;
     _dateOfBirth = snapshotData['DateOfBirth'] as String?;
+    _orgId = snapshotData['orgId'] as String?;
+    _migrationStatus = snapshotData['migrationStatus'] as String?;
   }
 
   static CollectionReference get collection =>
@@ -188,6 +208,8 @@ Map<String, dynamic> createCareRecipientsRecordData({
   bool? trackSymptoms,
   bool? tracksMealsHydration,
   String? dateOfBirth,
+  String? orgId,
+  String? migrationStatus,
 }) {
   final firestoreData = mapToFirestore(
     <String, dynamic>{
@@ -208,6 +230,8 @@ Map<String, dynamic> createCareRecipientsRecordData({
       'TrackSymptoms': trackSymptoms,
       'TracksMealsHydration': tracksMealsHydration,
       'DateOfBirth': dateOfBirth,
+      'orgId': orgId,
+      'migrationStatus': migrationStatus,
     }.withoutNulls,
   );
 
@@ -239,7 +263,9 @@ class CareRecipientsRecordDocumentEquality
         e1?.trackMedication == e2?.trackMedication &&
         e1?.trackSymptoms == e2?.trackSymptoms &&
         e1?.tracksMealsHydration == e2?.tracksMealsHydration &&
-        e1?.dateOfBirth == e2?.dateOfBirth;
+        e1?.dateOfBirth == e2?.dateOfBirth &&
+        e1?.orgId == e2?.orgId &&
+        e1?.migrationStatus == e2?.migrationStatus;
   }
 
   @override
@@ -262,7 +288,9 @@ class CareRecipientsRecordDocumentEquality
         e?.trackMedication,
         e?.trackSymptoms,
         e?.tracksMealsHydration,
-        e?.dateOfBirth
+        e?.dateOfBirth,
+        e?.orgId,
+        e?.migrationStatus
       ]);
 
   @override
