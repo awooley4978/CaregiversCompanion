@@ -291,7 +291,7 @@ Future<HttpClientResponse> _send(
     }
     return await request.close();
   } finally {
-    client.close(force: true);
+    client.close();
   }
 }
 
