@@ -58,18 +58,24 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
   }
 
-  /// Pumps frames until [finder] matches (bounded, so tests stay fast and
-  /// deterministic) or [maxPumps] is exhausted. After an auth-state change the
-  /// router's refresh-driven redirect and the sign-in provisioning complete
-  /// over several frames, so a poll beats a fixed pump count.
-  Future<void> pumpUntil(
-    WidgetTester tester,
-    Finder finder, {
-    int maxPumps = 30,
+  /// Pumps frames until [present] is in the tree AND [absent] has left it
+  /// (bounded, so tests stay fast and deterministic). After an auth-state
+  /// change the router's refresh-driven redirect swaps go_router's location,
+  /// but the Navigator runs a page transition during which the *outgoing*
+  /// page is still present. Waiting on [present] alone (as the earlier
+  /// pumpUntil did) could return on the transition's first frame while the
+  /// old page is still on screen, so we additionally require [absent] to be
+  /// gone. The unawaited sign-in provisioning runs concurrently over the same
+  /// frames, and the poll covers it deterministically without real async.
+  Future<void> pumpUntilTransition(
+    WidgetTester tester, {
+    required Finder present,
+    required Finder absent,
+    int maxPumps = 60,
   }) async {
     for (var i = 0; i < maxPumps; i++) {
       await tester.pump(const Duration(milliseconds: 100));
-      if (tester.any(finder)) {
+      if (tester.any(present) && !tester.any(absent)) {
         return;
       }
     }
@@ -113,7 +119,13 @@ void main() {
       email: 'caregiver@example.com',
       displayName: 'Test Caregiver',
     );
-    await pumpUntil(tester, find.text('Quick Actions'));
+    // The global redirect moves the user off /login onto the client directory
+    // and the outgoing login page leaves the tree once the swap settles.
+    await pumpUntilTransition(
+      tester,
+      present: find.text('Quick Actions'),
+      absent: find.text('Sign In'),
+    );
 
     // The global redirect moved the user off /login onto the client directory.
     expect(find.text('Quick Actions'), findsOneWidget);
@@ -134,11 +146,19 @@ void main() {
       email: 'caregiver@example.com',
       displayName: 'Test Caregiver',
     );
-    await pumpUntil(tester, find.text('Quick Actions'));
+    await pumpUntilTransition(
+      tester,
+      present: find.text('Quick Actions'),
+      absent: find.text('Sign In'),
+    );
     expect(find.text('Quick Actions'), findsOneWidget);
 
     fakeAuthPlatform.emitSignedOut();
-    await pumpUntil(tester, find.text('Caregivers Companion'));
+    await pumpUntilTransition(
+      tester,
+      present: find.text('Caregivers Companion'),
+      absent: find.text('Quick Actions'),
+    );
 
     expect(find.text('Caregivers Companion'), findsOneWidget);
     expect(find.text('Quick Actions'), findsNothing);
