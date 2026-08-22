@@ -1086,7 +1086,6 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                                           Colors.transparent,
                                                       highlightColor:
                                                           Colors.transparent,
-                                                      onTap: () async {},
                                                       child: Text(
                                                         'Sandwich and Soup',
                                                         style:

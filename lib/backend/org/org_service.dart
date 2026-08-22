@@ -322,7 +322,7 @@ Stream<List<SymptomEntriesRecord>> symptomEntriesForSelectedRecipient({
   );
 }
 
-/// Creates a careRecipients doc in [uid]'s VERIFIED active group (phase 3).
+/// Creates a careRecipients doc in [user]'s VERIFIED active group (phase 3).
 ///
 /// The orgId is resolved from `users/{uid}.activeGroupId` — read FRESH, never
 /// the in-memory cache alone for a WRITE — and the caller's active membership
@@ -332,21 +332,46 @@ Stream<List<SymptomEntriesRecord>> symptomEntriesForSelectedRecipient({
 /// silent failure (which is what an unscoped create would be once rules
 /// flip).
 ///
+/// Active-group resolution (the Care Profile save blocker, P1):
+///
+/// The active group context is written by the auth-state listener on sign-in
+/// (`attachAuthStateListener` -> `_onSignedIn` -> `ensureOrgMembership`), but
+/// that provisioning is FIRE-AND-FORGET (`unawaited`) and error-SWALLOWED, so
+/// a signed-in user can reach this save with `users/{uid}.activeGroupId` not
+/// yet (or, after a failed provisioning step, not at all) persisted. Reading
+/// it alone would then throw the old "No active care circle yet".
+///
+/// To fix this, when the fresh `users/{uid}.activeGroupId` is missing we
+/// resolve it through [ensureOrgMembership] — the canonical, idempotent,
+/// race-safe resolver that (a) restores the user's EXISTING org/membership if
+/// one already exists (it never creates a duplicate org; the org id is
+/// deterministic `org_<uid>`), (b) verifies active membership, and (c)
+/// persists the restored context back to `users/{uid}.activeGroupId` for
+/// subsequent reads. This does NOT delete, reset, or recreate any existing
+/// careRecipient — it only ever writes THIS one new doc. It also does not
+/// weaken authorization: it runs the exact same membership-verifying path the
+/// Phase-4 rules encode server-side.
+///
 /// [data] is the caller's `createCareRecipientsRecordData(...)` map WITHOUT
 /// orgId; this function adds orgId after verification so no future caller can
 /// forget it. Returns the created document reference.
 Future<DocumentReference<Map<String, dynamic>>> createCareRecipientForActiveGroup({
-  required String uid,
+  required User user,
   required Map<String, dynamic> data,
 }) async {
+  final uid = user.uid;
   if (uid.isEmpty) {
     throw OrgAccessDeniedException('Sign in to save a care recipient.');
   }
-  final orgId = await getActiveGroupId(uid);
-  if (orgId == null || orgId.isEmpty) {
-    throw OrgAccessDeniedException(
-        'No active care circle yet — sign in once so your care circle is '
-        'created, then tap Save Profile again.');
+  // Resolve the active group, falling back to ensureOrgMembership (which both
+  // verifies membership AND persists `users/{uid}.activeGroupId`) whenever the
+  // profile is missing its group context.
+  final String orgId;
+  final existing = await getActiveGroupId(uid);
+  if (existing != null && existing.isNotEmpty) {
+    orgId = existing;
+  } else {
+    orgId = await ensureOrgMembership(user);
   }
   if (!await isActiveMember(orgId, uid)) {
     throw OrgAccessDeniedException(

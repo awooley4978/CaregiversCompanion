@@ -9,7 +9,6 @@ import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/flutter_flow_widgets.dart';
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'f_care_notes_model.dart';
@@ -35,27 +34,11 @@ class _FCareNotesWidgetState extends State<FCareNotesWidget> {
     super.initState();
     _model = createModel(context, () => FCareNotesModel());
 
-    // On page load action.
-    SchedulerBinding.instance.addPostFrameCallback((_) async {
-      await showModalBottomSheet(
-        isScrollControlled: true,
-        backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
-        enableDrag: false,
-        context: context,
-        builder: (context) {
-          return GestureDetector(
-            onTap: () {
-              FocusScope.of(context).unfocus();
-              FocusManager.instance.primaryFocus?.unfocus();
-            },
-            child: Padding(
-              padding: MediaQuery.viewInsetsOf(context),
-              child: NavMenuDirectoryWidget(),
-            ),
-          );
-        },
-      ).then((value) => safeSetState(() {}));
-    });
+    // NOTE (P1 fix): the old "on page load" action auto-opened the
+    // NavMenuDirectory bottom sheet every time this screen loaded. That made
+    // navigating to Care Notes show the navigation menu instead of the notes
+    // content ("Selecting Care Notes routes back to the menu"). Removed — the
+    // menu is still reachable via the ☰ button on this screen.
 
     _model.textController ??= TextEditingController();
     _model.textFieldFocusNode ??= FocusNode();

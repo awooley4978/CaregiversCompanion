@@ -808,9 +808,9 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
                               hoverColor: Colors.transparent,
                               highlightColor: Colors.transparent,
                               onTap: () async {
-                                final uid =
-                                    FirebaseAuth.instance.currentUser?.uid;
-                                if (uid == null) {
+                                final user =
+                                    FirebaseAuth.instance.currentUser;
+                                if (user == null) {
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(
                                       content: Text(
@@ -820,8 +820,9 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
                                   return;
                                 }
                                 try {
-                                  await createCareRecipientForActiveGroup(
-                                    uid: uid,
+                                  final createdRef =
+                                      await createCareRecipientForActiveGroup(
+                                    user: user,
                                     data: createCareRecipientsRecordData(
                                       name: _model.textFieldNameModel
                                           .inputTextController.text,
@@ -861,9 +862,35 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
                                           .switchValue,
                                     ),
                                   );
+                                  // Make this the active care card so the rest
+                                  // of the app (dashboard, notes, etc.) shows
+                                  // the profile we just saved.
+                                  FFAppState().selectedCareRecipient =
+                                      createdRef;
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                            'Care Profile saved successfully.'),
+                                      ),
+                                    );
+                                  }
                                 } on OrgAccessDeniedException catch (e) {
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(content: Text(e.message)),
+                                  );
+                                } catch (e) {
+                                  // A failed save must never destroy the
+                                  // entered form data: the text fields retain
+                                  // their controllers, and we only surface a
+                                  // clear message instead of wiping the form.
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                          'Could not save the Care Profile. '
+                                          'Please check your connection and '
+                                          'try again.'),
+                                    ),
                                   );
                                 }
                               },
