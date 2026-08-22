@@ -116,7 +116,7 @@ void main() {
       await provision('u1', email: 'founder@example.com');
 
       await createCareRecipientForActiveGroup(
-        uid: 'u1',
+        user: FirebaseAuth.instance.currentUser!,
         data: createCareRecipientsRecordData(
           name: 'Ada',
           primaryCondition: 'Diabetes',
@@ -145,7 +145,7 @@ void main() {
 
       await expectLater(
         createCareRecipientForActiveGroup(
-          uid: 'u9',
+          user: await signIn('u9'),
           data: createCareRecipientsRecordData(name: 'Ghost'),
         ),
         throwsA(isA<OrgAccessDeniedException>()),
@@ -159,7 +159,7 @@ void main() {
     test('refused when the user has no group context at all', () async {
       await expectLater(
         createCareRecipientForActiveGroup(
-          uid: 'u9',
+          user: await signIn('u9'),
           data: createCareRecipientsRecordData(name: 'Ghost'),
         ),
         throwsA(isA<OrgAccessDeniedException>()),
