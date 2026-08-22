@@ -16,6 +16,7 @@ import '/flutter_flow/flutter_flow_util.dart';
 import 'serialization_util.dart';
 
 import '/index.dart';
+import '/pages/assignment_ended/assignment_ended_widget.dart';
 
 export 'package:go_router/go_router.dart';
 export 'serialization_util.dart';
@@ -165,6 +166,11 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
           name: HouseholdWidget.routeName,
           path: HouseholdWidget.routePath,
           builder: (context, params) => HouseholdWidget(),
+        ),
+        FFRoute(
+          name: AssignmentEndedWidget.routeName,
+          path: AssignmentEndedWidget.routePath,
+          builder: (context, params) => AssignmentEndedWidget(),
         ),
         FFRoute(
           name: CalendarPageWidget.routeName,
