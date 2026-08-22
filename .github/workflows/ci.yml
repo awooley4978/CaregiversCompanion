@@ -47,6 +47,15 @@ jobs:
           cache: npm
           cache-dependency-path: firebase/package-lock.json
 
+      # The Firestore emulator (which firebase-tools auto-downloads) is a JVM
+      # app, and recent firebase-tools refuse to run with a JDK older than 21.
+      # The ubuntu-latest image's default JDK is 17, so pin Java 21 explicitly
+      # before the emulator-backed npm test step.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
       - name: Install test deps
         run: npm install
 
