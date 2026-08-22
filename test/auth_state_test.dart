@@ -58,6 +58,23 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
   }
 
+  /// Pumps frames until [finder] matches (bounded, so tests stay fast and
+  /// deterministic) or [maxPumps] is exhausted. After an auth-state change the
+  /// router's refresh-driven redirect and the sign-in provisioning complete
+  /// over several frames, so a poll beats a fixed pump count.
+  Future<void> pumpUntil(
+    WidgetTester tester,
+    Finder finder, {
+    int maxPumps = 30,
+  }) async {
+    for (var i = 0; i < maxPumps; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+      if (tester.any(finder)) {
+        return;
+      }
+    }
+  }
+
   testWidgets('signed out: login is shown and no data screen is reachable',
       (tester) async {
     authSub = attachAuthStateListener(AppStateNotifier.instance);
@@ -96,8 +113,7 @@ void main() {
       email: 'caregiver@example.com',
       displayName: 'Test Caregiver',
     );
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 500));
+    await pumpUntil(tester, find.text('Quick Actions'));
 
     // The global redirect moved the user off /login onto the client directory.
     expect(find.text('Quick Actions'), findsOneWidget);
@@ -118,13 +134,11 @@ void main() {
       email: 'caregiver@example.com',
       displayName: 'Test Caregiver',
     );
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 500));
+    await pumpUntil(tester, find.text('Quick Actions'));
     expect(find.text('Quick Actions'), findsOneWidget);
 
     fakeAuthPlatform.emitSignedOut();
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 500));
+    await pumpUntil(tester, find.text('Caregivers Companion'));
 
     expect(find.text('Caregivers Companion'), findsOneWidget);
     expect(find.text('Quick Actions'), findsNothing);
