@@ -85,9 +85,17 @@ service cloud.firestore {
 
     // ---------------------------------------------------------------------------
     // helpers: recipient access (owner org + grants + assignment scoping, D6)
+    // NOTE (bug fix 2026-08-22): all helpers take the RECIPIENT DOC ID (a
+    // string), never a Path. `rules.Path` has NO `.id` (only
+    // rules.firestore.Resource does) — calling `.id` on a Path value resolves
+    // to undefined, malformed the `get()` path interpolation, errored the rule,
+    // and denied everything. Call sites that match the id directly
+    // (careRecipients/{docId}, carechecklist/{parent}, assignments/{recipientId})
+    // pass the match variable; ref-linked collections (careNotes / mealEntries
+    // / symptomEntries) derive it via `get(<stored ref>).id` (a Resource).
     // ---------------------------------------------------------------------------
-    function recipientOrgId(ref) {
-      return get(/databases/$(database)/documents/careRecipients/$(ref.id)).data.orgId;
+    function recipientOrgId(recipientId) {
+      return get(/databases/$(database)/documents/careRecipients/$(recipientId)).data.orgId;
     }
 
     function orgDoc(orgId) {
@@ -131,38 +139,38 @@ service cloud.firestore {
 
     // Kind-branched within-org visibility (D6): family -> any active member;
     // organization -> owner/admin, or caregiver/viewer with an active assignment.
-    function canAccessRecipientInOrg(ref) {
-      return memberHasRole(recipientOrgId(ref), ['owner', 'admin', 'caregiver', 'viewer'])
-        && ( isOrgKind(recipientOrgId(ref), 'family')
-             || memberHasRole(recipientOrgId(ref), ['owner', 'admin'])
-             || ( memberHasRole(recipientOrgId(ref), ['caregiver', 'viewer'])
-                  && hasActiveAssignment(ref.id) ) );
+    function canAccessRecipientInOrg(recipientId) {
+      return memberHasRole(recipientOrgId(recipientId), ['owner', 'admin', 'caregiver', 'viewer'])
+        && ( isOrgKind(recipientOrgId(recipientId), 'family')
+             || memberHasRole(recipientOrgId(recipientId), ['owner', 'admin'])
+             || ( memberHasRole(recipientOrgId(recipientId), ['caregiver', 'viewer'])
+                  && hasActiveAssignment(recipientId) ) );
     }
 
     // Read access: within-org (kind-branched, common case) OR grantee with an
     // active share for the caller's active group. Grants are org-wide — the
     // share branch does not consult assignments (§3.2 note).
-    function canAccessRecipientRef(ref) {
-      return signedIn() && ref is path
-        && ( canAccessRecipientInOrg(ref)
-          || hasActiveShare(ref.id, activeGroupId()) );
+    function canAccessRecipientRef(recipientId) {
+      return signedIn() && recipientId is string
+        && ( canAccessRecipientInOrg(recipientId)
+          || hasActiveShare(recipientId, activeGroupId()) );
     }
 
     // Write access to recipient data: family -> member role >= caregiver;
     // organization -> owner/admin, or assigned caregiver; grantee -> share
     // accessLevel 'caregiver' (D2 default).
-    function canWriteInOrg(ref) {
-      return memberHasRole(recipientOrgId(ref), ['owner', 'admin', 'caregiver'])
-        && ( isOrgKind(recipientOrgId(ref), 'family')
-             || memberHasRole(recipientOrgId(ref), ['owner', 'admin'])
-             || ( memberHasRole(recipientOrgId(ref), ['caregiver'])
-                  && hasActiveAssignment(ref.id) ) );
+    function canWriteInOrg(recipientId) {
+      return memberHasRole(recipientOrgId(recipientId), ['owner', 'admin', 'caregiver'])
+        && ( isOrgKind(recipientOrgId(recipientId), 'family')
+             || memberHasRole(recipientOrgId(recipientId), ['owner', 'admin'])
+             || ( memberHasRole(recipientOrgId(recipientId), ['caregiver'])
+                  && hasActiveAssignment(recipientId) ) );
     }
 
-    function canWriteRecipientData(ref) {
-      return signedIn() && ref is path
-        && ( canWriteInOrg(ref)
-          || shareLevel(ref.id, activeGroupId()) == 'caregiver' );
+    function canWriteRecipientData(recipientId) {
+      return signedIn() && recipientId is string
+        && ( canWriteInOrg(recipientId)
+          || shareLevel(recipientId, activeGroupId()) == 'caregiver' );
     }
 
     // ---------------------------------------------------------------------------
@@ -286,7 +294,7 @@ service cloud.firestore {
     // canAccessRecipientRef.
     // ---------------------------------------------------------------------------
     match /recipientShares/{recipientId}/grants/{granteeOrgId} {
-      allow read: if isActiveMember(recipientOrgId(/databases/$(database)/documents/careRecipients/$(recipientId)));
+      allow read: if isActiveMember(recipientOrgId(recipientId));
       allow create, update, delete:
         if isMemberWithRole(
              get(/databases/$(database)/documents/careRecipients/$(recipientId)).data.orgId,
@@ -304,12 +312,12 @@ service cloud.firestore {
       allow create: if isActiveMember(request.resource.data.orgId)
         && request.resource.data.orgId is string;
       // Read: within-org (kind-branched, D6) or grantee via an active share.
-      allow read: if canAccessRecipientRef(/databases/$(database)/documents/careRecipients/$(docId));
+      allow read: if canAccessRecipientRef(docId);
       // Owner-org caregiver+ (kind-branched) or caregiver-level grantee;
       // orgId is immutable under rules (§4.3) — no transfer in v1 (grants are
       // the v1 mechanism for provider access).
       allow update: if request.resource.data.orgId == resource.data.orgId
-        && canWriteRecipientData(/databases/$(database)/documents/careRecipients/$(docId));
+        && canWriteRecipientData(docId);
       // Q5: delete = owner of the recipient's org only.
       allow delete: if isMemberWithRole(resource.data.orgId, ['owner']);
     }
@@ -322,43 +330,47 @@ service cloud.firestore {
     // PARENT recipient doc.
     // ---------------------------------------------------------------------------
     match /careRecipients/{parent}/carechecklist/{docId} {
-      function parentRef() {
-        return /databases/$(database)/documents/careRecipients/$(parent);
-      }
-      allow read:   if canAccessRecipientRef(parentRef());
-      allow create: if canWriteRecipientData(parentRef());
+      // `parent` is the matched careRecipients doc id — pass it directly (a
+      // Path has no `.id`).
+      allow read:   if canAccessRecipientRef(parent);
+      allow create: if canWriteRecipientData(parent);
       allow update, delete:
-        if canWriteRecipientData(parentRef());
+        if canWriteRecipientData(parent);
     }
 
     // ---------------------------------------------------------------------------
     // careNotes — ref-linked via careRecipientRef
+    // The stored field is a DocumentReference; we cannot call `.id` on it (a
+    // Reference has no `.id`), so we derive the recipient id from the referenced
+    // doc via get(<ref>).id — a rules.firestore.Resource, which DOES expose
+    // `.id` — then reuse the same string-id helpers. This preserves the full
+    // parent-org / share / assignment gate.
     // ---------------------------------------------------------------------------
     match /careNotes/{docId} {
-      allow read:   if canAccessRecipientRef(resource.data.careRecipientRef);
-      allow create: if canWriteRecipientData(request.resource.data.careRecipientRef);
+      allow read:   if canAccessRecipientRef(get(resource.data.careRecipientRef).id);
+      allow create: if canWriteRecipientData(get(request.resource.data.careRecipientRef).id);
       allow update, delete:
-        if canWriteRecipientData(resource.data.careRecipientRef);
+        if canWriteRecipientData(get(resource.data.careRecipientRef).id);
     }
 
     // ---------------------------------------------------------------------------
-    // mealEntries — ref-linked via patientRef
+    // mealEntries — ref-linked via patientRef (see careNotes note above)
     // ---------------------------------------------------------------------------
     match /mealEntries/{docId} {
-      allow read:   if canAccessRecipientRef(resource.data.patientRef);
-      allow create: if canWriteRecipientData(request.resource.data.patientRef);
+      allow read:   if canAccessRecipientRef(get(resource.data.patientRef).id);
+      allow create: if canWriteRecipientData(get(request.resource.data.patientRef).id);
       allow update, delete:
-        if canWriteRecipientData(resource.data.patientRef);
+        if canWriteRecipientData(get(resource.data.patientRef).id);
     }
 
     // ---------------------------------------------------------------------------
-    // symptomEntries — ref-linked via patientRef
+    // symptomEntries — ref-linked via patientRef (see careNotes note above)
     // ---------------------------------------------------------------------------
     match /symptomEntries/{docId} {
-      allow read:   if canAccessRecipientRef(resource.data.patientRef);
-      allow create: if canWriteRecipientData(request.resource.data.patientRef);
+      allow read:   if canAccessRecipientRef(get(resource.data.patientRef).id);
+      allow create: if canWriteRecipientData(get(request.resource.data.patientRef).id);
       allow update, delete:
-        if canWriteRecipientData(resource.data.patientRef);
+        if canWriteRecipientData(get(resource.data.patientRef).id);
     }
 
     // ---------------------------------------------------------------------------
