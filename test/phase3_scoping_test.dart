@@ -116,7 +116,7 @@ void main() {
       await provision('u1', email: 'founder@example.com');
 
       await createCareRecipientForActiveGroup(
-        uid: 'u1',
+        user: FirebaseAuth.instance.currentUser!,
         data: createCareRecipientsRecordData(
           name: 'Ada',
           primaryCondition: 'Diabetes',
@@ -145,7 +145,7 @@ void main() {
 
       await expectLater(
         createCareRecipientForActiveGroup(
-          uid: 'u9',
+          user: await signIn('u9'),
           data: createCareRecipientsRecordData(name: 'Ghost'),
         ),
         throwsA(isA<OrgAccessDeniedException>()),
@@ -156,18 +156,25 @@ void main() {
       );
     });
 
-    test('refused when the user has no group context at all', () async {
-      await expectLater(
-        createCareRecipientForActiveGroup(
-          uid: 'u9',
-          data: createCareRecipientsRecordData(name: 'Ghost'),
-        ),
-        throwsA(isA<OrgAccessDeniedException>()),
+    test('missing group context is restored via the VERIFIED family org '
+        '(never an unverified write — P1)', () async {
+      // P1 behavior change: a signed-in user whose users/{uid}.activeGroupId
+      // is missing is NO LONGER refused. The save resolves the active group
+      // through the membership-verifying ensureOrgMembership, so the write
+      // still lands in a VERIFIED org (the user's own deterministic family
+      // org) rather than an unscoped/unverified location.
+      await createCareRecipientForActiveGroup(
+        user: await signIn('u9'),
+        data: createCareRecipientsRecordData(name: 'Ghost'),
       );
-      expect(
-        fakeFirestore.docs.keys.any((p) => p.startsWith('careRecipients/')),
-        isFalse,
-      );
+      // The write is still verifiably scoped: exactly one careRecipients doc,
+      // carrying u9's verified family orgId — never unverified.
+      final created = fakeFirestore.docs.entries
+          .where((e) => RegExp(r'^careRecipients/[^/]+$').hasMatch(e.key))
+          .toList();
+      expect(created.length, 1);
+      expect(created.single.value['orgId'], 'org_u9');
+      expect(created.single.value['migrationStatus'], 'created');
     });
   });
 
