@@ -178,6 +178,59 @@ Future<User?> signInWithGoogle() async {
   throw UnimplementedError('Google sign-in is not available on this device yet.');
 }
 
+/// Handles an incoming Firebase email-action / email-link return on the web
+/// entry (the temporary web tester and the eventual production web/deep-link
+/// path). This is the RECEIVER seam for the continue URL configured in
+/// [authConfig.authContinueUrl]: Firebase's hosted email-action handler
+/// (`<authDomain>/__/auth/handler`) only completes a "Continue URL is required
+/// for email sign-in!" flow when the app can redeem the link it was returned
+/// at.
+///
+/// Why this seams exists and is safe to call on every launch:
+///  * The app's primary email sign-in is Email/Password (unchanged); this
+///    helper only reacts when the app is opened AT an email-link return URL
+///    (i.e. the owner tapped a passwordless/verification/reset link on their
+///    phone), so normal login and session restore are unaffected.
+///  * Email Link (passwordless) redemption needs the recipient email, which
+///    Firebase deliberately does NOT embed in the link — the flow that issued
+///    the link stores it per-browser at send time. We recover it when present;
+///    when absent (this app never sends passwordless links) we fall through to
+///    the ordinary login. [email] can be supplied by a sender flow.
+///  * On success the existing [attachAuthStateListener] provisions the
+///    profile/org and routes the user to '/' — nothing downstream changes.
+///
+/// Guardrail: this does NOT change the authentication model, Firestore rules,
+/// org scoping, or any account data. Email/Password remains the primary login.
+Future<void> completeEmailActionLinkIfNeeded({
+  String? email,
+  Uri? initialUri,
+}) async {
+  if (!kIsWeb) {
+    return; // Email-action links are a web/deep-link concern only.
+  }
+  final uri = initialUri ?? Uri.base;
+  final link = uri.toString();
+  if (!FirebaseAuth.instance.isSignInWithEmailLink(link)) {
+    return; // Not an email-link return — nothing to do.
+  }
+  final redeemingEmail = (email ?? '').trim();
+  if (redeemingEmail.isEmpty) {
+    // No recipient email available for this origin → cannot redeem here. The
+    // app falls through to the normal login screen.
+    return;
+  }
+  try {
+    await FirebaseAuth.instance.signInWithEmailLink(
+      email: redeemingEmail,
+      emailLink: link,
+    );
+    // Success: the auth-state listener flips AppStateNotifier and the router
+    // redirect takes over. Nothing to do here.
+  } catch (_) {
+    // Stale/expired link or email mismatch → leave the user on login.
+  }
+}
+
 /// Human-readable message for auth-form inline errors.
 ///
 /// Returns null when the error is a user abort (e.g. dismissing the Google

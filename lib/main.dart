@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:provider/provider.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -26,6 +28,14 @@ void main() async {
   // While the persisted session restores (authInitializing), the redirect
   // stays put; after it resolves, signed-out users land on /login.
   attachAuthStateListener(AppStateNotifier.instance);
+
+  // Web/deep-link entry: if the app was opened AT an email-action return URL
+  // (e.g. the owner taps a passwordless / email-verification / reset link from
+  // the email Firebase sent, whose continue URL is authConfig.authContinueUrl),
+  // redeem it so the existing auth-state listener provisions & routes to '/'.
+  // No-op on mobile and whenever the app is not opened via an email-action
+  // link — the primary Email/Password login is unchanged.
+  unawaited(completeEmailActionLinkIfNeeded());
 
   runApp(ChangeNotifierProvider(
     create: (context) => appState,
