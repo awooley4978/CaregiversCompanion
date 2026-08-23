@@ -1,13 +1,11 @@
 import '/backend/backend.dart';
-import '/components/button/button_widget.dart';
 import '/components/nav_menu_directory/nav_menu_directory_widget.dart';
-import '/components/note_card/note_card_widget.dart';
-import '/components/tab_group/tab_group_widget.dart';
 import '/flutter_flow/flutter_flow_icon_button.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/flutter_flow_widgets.dart';
-import 'dart:ui';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -26,36 +24,265 @@ class FCareNotesWidget extends StatefulWidget {
 
 class _FCareNotesWidgetState extends State<FCareNotesWidget> {
   late FCareNotesModel _model;
-
   final scaffoldKey = GlobalKey<ScaffoldState>();
+
+  /// The selected care recipient's name, shown on each note so the reader
+  /// always knows which patient the note belongs to. This page is scoped to
+  /// the currently selected care recipient.
+  String _patientName = '';
 
   @override
   void initState() {
     super.initState();
     _model = createModel(context, () => FCareNotesModel());
-
-    // NOTE (P1 fix): the old "on page load" action auto-opened the
-    // NavMenuDirectory bottom sheet every time this screen loaded. That made
-    // navigating to Care Notes show the navigation menu instead of the notes
-    // content ("Selecting Care Notes routes back to the menu"). Removed — the
-    // menu is still reachable via the ☰ button on this screen.
-
     _model.textController ??= TextEditingController();
     _model.textFieldFocusNode ??= FocusNode();
-
     WidgetsBinding.instance.addPostFrameCallback((_) => safeSetState(() {}));
   }
 
   @override
   void dispose() {
     _model.dispose();
-
     super.dispose();
+  }
+
+  Future<void> _openMenu(BuildContext context) async {
+    await showModalBottomSheet(
+      isScrollControlled: true,
+      backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
+      enableDrag: false,
+      context: context,
+      builder: (context) => GestureDetector(
+        onTap: () {
+          FocusScope.of(context).unfocus();
+          FocusManager.instance.primaryFocus?.unfocus();
+        },
+        child: Padding(
+          padding: MediaQuery.viewInsetsOf(context),
+          child: NavMenuDirectoryWidget(),
+        ),
+      ),
+    );
+  }
+
+  /// Writes a new note into `careNotes`, ref-linked to the selected care
+  /// recipient. The Phase-4 rules enforce the parent-org gate via
+  /// `careRecipientRef`, so this write path is org-scoped exactly like the
+  /// existing note-card save — no rules change, no cross-user leakage.
+  Future<void> _addNote(BuildContext context) async {
+    final text = _model.textController?.text.trim() ?? '';
+    if (text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Write a note before saving.')),
+      );
+      return;
+    }
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sign in to save a note.')),
+      );
+      return;
+    }
+    final selected = FFAppState().selectedCareRecipient;
+    if (selected == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Select a care recipient to add a note.'),
+        ),
+      );
+      return;
+    }
+    // Author = the signed-in user; the created date/time is captured at
+    // creation via server timestamps.
+    final authorName = (user.displayName?.trim().isNotEmpty ?? false)
+        ? user.displayName!.trim()
+        : ((user.email?.trim().isNotEmpty ?? false)
+            ? user.email!.trim()
+            : 'Caregiver');
+    try {
+      await CareNotesRecord.collection.doc().set({
+        ...createCareNotesRecordData(
+          careRecipientRef: selected,
+          noteText: text,
+          createdBy: authorName,
+        ),
+        ...mapToFirestore({
+          'noteDateTime': FieldValue.serverTimestamp(),
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        }),
+      });
+      _model.textController?.clear();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Note added.')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not save the note. Please try again.'),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteNote(BuildContext context, CareNotesRecord note) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete note?'),
+        content: const Text(
+            'This note will be removed for everyone in the care circle.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) {
+      return;
+    }
+    try {
+      await note.reference.delete();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Note deleted.')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not delete the note.')),
+        );
+      }
+    }
+  }
+
+  Widget _buildNoteCard(
+    BuildContext context,
+    CareNotesRecord note,
+    String patientName,
+  ) {
+    final theme = FlutterFlowTheme.of(context);
+    final when = note.noteDateTime ?? note.createdAt;
+    final timeLabel =
+        when != null ? dateTimeFormat('MMM d, yyyy · hh:mm a', when) : '';
+    final author =
+        note.createdBy.trim().isNotEmpty ? note.createdBy.trim() : 'Caregiver';
+    final initials = author
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((p) => p.isNotEmpty)
+        .take(2)
+        .map((p) => p[0].toUpperCase())
+        .join();
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: theme.secondaryBackground,
+        borderRadius: BorderRadius.circular(24.0),
+        shape: BoxShape.rectangle,
+      ),
+      padding: EdgeInsets.all(16.0),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 36.0,
+                height: 36.0,
+                decoration: BoxDecoration(
+                  color: theme.primary,
+                  shape: BoxShape.circle,
+                ),
+                alignment: AlignmentDirectional(0.0, 0.0),
+                child: Text(
+                  initials.isEmpty ? 'C' : initials,
+                  textAlign: TextAlign.center,
+                  style: theme.labelMedium.override(
+                    font: GoogleFonts.nunito(
+                      fontWeight: FontWeight.w600,
+                      color: theme.primaryText,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12.0),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      author,
+                      style: theme.titleSmall.override(
+                        font: GoogleFonts.nunito(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    if (patientName.isNotEmpty)
+                      Text(
+                        'for $patientName',
+                        style: theme.bodySmall.override(
+                          font: GoogleFonts.nunito(),
+                          color: theme.secondaryText,
+                        ),
+                      ),
+                    if (timeLabel.isNotEmpty)
+                      Text(
+                        timeLabel,
+                        style: theme.bodySmall.override(
+                          font: GoogleFonts.nunito(),
+                          color: theme.secondaryText,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: Icon(
+                  Icons.delete_outline_rounded,
+                  color: theme.secondaryText,
+                  size: 20.0,
+                ),
+                tooltip: 'Delete note',
+                onPressed: () => _deleteNote(context, note),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12.0),
+          Text(
+            note.noteText,
+            style: theme.bodyMedium.override(
+              font: GoogleFonts.nunito(),
+              color: theme.primaryText,
+              lineHeight: 1.4,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     context.watch<FFAppState>();
+    final theme = FlutterFlowTheme.of(context);
+    final selected = FFAppState().selectedCareRecipient;
 
     return GestureDetector(
       onTap: () {
@@ -64,566 +291,231 @@ class _FCareNotesWidgetState extends State<FCareNotesWidget> {
       },
       child: Scaffold(
         key: scaffoldKey,
-        backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
-        body: Stack(
-          alignment: AlignmentDirectional(-1.0, -1.0),
-          children: [
-            SingleChildScrollView(
-              primary: false,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.start,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Padding(
-                    padding:
-                        EdgeInsetsDirectional.fromSTEB(0.0, 0.0, 0.0, 100.0),
-                    child: Container(
-                      child: Padding(
-                        padding:
-                            EdgeInsetsDirectional.fromSTEB(0.0, 50.0, 0.0, 0.0),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          mainAxisAlignment: MainAxisAlignment.start,
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Container(
-                              decoration: BoxDecoration(
-                                color: FlutterFlowTheme.of(context)
-                                    .primaryBackground,
-                                shape: BoxShape.rectangle,
-                              ),
-                            ),
-                            Container(
-                              child: Container(
-                                width: 100.0,
-                                height: 100.0,
-                                decoration: BoxDecoration(
-                                  color: FlutterFlowTheme.of(context)
-                                      .secondaryBackground,
-                                ),
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color: FlutterFlowTheme.of(context)
-                                        .primaryBackground,
-                                    shape: BoxShape.rectangle,
-                                  ),
-                                  child: Padding(
-                                    padding: EdgeInsetsDirectional.fromSTEB(
-                                        24.0, 32.0, 24.0, 16.0),
-                                    child: Container(
-                                      child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.start,
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Align(
-                                            alignment:
-                                                AlignmentDirectional(-1.0, 0.0),
-                                            child: Padding(
-                                              padding: EdgeInsetsDirectional
-                                                  .fromSTEB(
-                                                      20.0, 0.0, 0.0, 0.0),
-                                              child: Row(
-                                                mainAxisSize: MainAxisSize.max,
-                                                mainAxisAlignment:
-                                                    MainAxisAlignment
-                                                        .spaceBetween,
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.center,
-                                                children: [
-                                                  Text(
-                                                    'Care Notes',
-                                                    style: FlutterFlowTheme.of(
-                                                            context)
-                                                        .bodyMedium
-                                                        .override(
-                                                          font: GoogleFonts
-                                                              .nunito(
-                                                            fontWeight:
-                                                                FontWeight.bold,
-                                                            fontStyle:
-                                                                FlutterFlowTheme.of(
-                                                                        context)
-                                                                    .bodyMedium
-                                                                    .fontStyle,
-                                                          ),
-                                                          fontSize: 28.0,
-                                                          letterSpacing: 0.0,
-                                                          fontWeight:
-                                                              FontWeight.bold,
-                                                          fontStyle:
-                                                              FlutterFlowTheme.of(
-                                                                      context)
-                                                                  .bodyMedium
-                                                                  .fontStyle,
-                                                          lineHeight: 1.3,
-                                                        ),
-                                                  ),
-                                                  Align(
-                                                    alignment:
-                                                        AlignmentDirectional(
-                                                            1.0, -1.0),
-                                                    child: Padding(
-                                                      padding:
-                                                          EdgeInsetsDirectional
-                                                              .fromSTEB(
-                                                                  0.0,
-                                                                  0.0,
-                                                                  8.0,
-                                                                  0.0),
-                                                      child:
-                                                          FlutterFlowIconButton(
-                                                        borderRadius: 28.0,
-                                                        buttonSize: 40.0,
-                                                        fillColor: FlutterFlowTheme
-                                                                .of(context)
-                                                            .secondaryBackground,
-                                                        icon: Icon(
-                                                          Icons.menu,
-                                                          color: FlutterFlowTheme
-                                                                  .of(context)
-                                                              .secondaryText,
-                                                          size: 24.0,
-                                                        ),
-                                                        onPressed: () async {
-                                                          await showModalBottomSheet(
-                                                            isScrollControlled:
-                                                                true,
-                                                            backgroundColor:
-                                                                FlutterFlowTheme.of(
-                                                                        context)
-                                                                    .primaryBackground,
-                                                            enableDrag: false,
-                                                            context: context,
-                                                            builder: (context) {
-                                                              return GestureDetector(
-                                                                onTap: () {
-                                                                  FocusScope.of(
-                                                                          context)
-                                                                      .unfocus();
-                                                                  FocusManager
-                                                                      .instance
-                                                                      .primaryFocus
-                                                                      ?.unfocus();
-                                                                },
-                                                                child: Padding(
-                                                                  padding: MediaQuery
-                                                                      .viewInsetsOf(
-                                                                          context),
-                                                                  child:
-                                                                      NavMenuDirectoryWidget(),
-                                                                ),
-                                                              );
-                                                            },
-                                                          ).then((value) =>
-                                                              safeSetState(
-                                                                  () {}));
-                                                        },
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                        ].divide(SizedBox(height: 8.0)),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                            Padding(
-                              padding: EdgeInsetsDirectional.fromSTEB(
-                                  24.0, 0.0, 24.0, 0.0),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                mainAxisAlignment: MainAxisAlignment.start,
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  wrapWithModel(
-                                    model: _model.tabGroupModel,
-                                    updateCallback: () => safeSetState(() {}),
-                                    child: TabGroupWidget(
-                                      label2: 'My Notes',
-                                      label2Present: true,
-                                      label3: 'Private',
-                                      label3Present: true,
-                                      label4: '',
-                                      label4Present: false,
-                                      label5: '',
-                                      label5Present: false,
-                                      label1: 'All Notes',
-                                    ),
-                                  ),
-                                  StreamBuilder<List<CareNotesRecord>>(
-                                    stream: queryCareNotesRecord(
-                                      queryBuilder: (careNotesRecord) =>
-                                          careNotesRecord
-                                              .where(
-                                                'careRecipientRef',
-                                                isEqualTo: FFAppState()
-                                                    .selectedCareRecipient,
-                                              )
-                                              .orderBy('createdAt',
-                                                  descending: true),
-                                      singleRecord: true,
-                                    ),
-                                    builder: (context, snapshot) {
-                                      // Customize what your widget looks like when it's loading.
-                                      if (!snapshot.hasData) {
-                                        return Center(
-                                          child: SizedBox(
-                                            width: 50.0,
-                                            height: 50.0,
-                                            child: CircularProgressIndicator(
-                                              valueColor:
-                                                  AlwaysStoppedAnimation<Color>(
-                                                FlutterFlowTheme.of(context)
-                                                    .primary,
-                                              ),
-                                            ),
-                                          ),
-                                        );
-                                      }
-                                      List<CareNotesRecord>
-                                          textFieldCareNotesRecordList =
-                                          snapshot.data!;
-                                      // Return an empty Container when the item does not exist.
-                                      if (snapshot.data!.isEmpty) {
-                                        return Container();
-                                      }
-                                      final textFieldCareNotesRecord =
-                                          textFieldCareNotesRecordList
-                                                  .isNotEmpty
-                                              ? textFieldCareNotesRecordList
-                                                  .first
-                                              : null;
-
-                                      return Container(
-                                        width: 200.0,
-                                        child: TextFormField(
-                                          controller: _model.textController,
-                                          focusNode: _model.textFieldFocusNode,
-                                          autofocus: false,
-                                          enabled: true,
-                                          obscureText: false,
-                                          decoration: InputDecoration(
-                                            isDense: true,
-                                            labelStyle:
-                                                FlutterFlowTheme.of(context)
-                                                    .labelMedium
-                                                    .override(
-                                                      font: GoogleFonts.nunito(
-                                                        fontWeight:
-                                                            FlutterFlowTheme.of(
-                                                                    context)
-                                                                .labelMedium
-                                                                .fontWeight,
-                                                        fontStyle:
-                                                            FlutterFlowTheme.of(
-                                                                    context)
-                                                                .labelMedium
-                                                                .fontStyle,
-                                                      ),
-                                                      letterSpacing: 0.0,
-                                                      fontWeight:
-                                                          FlutterFlowTheme.of(
-                                                                  context)
-                                                              .labelMedium
-                                                              .fontWeight,
-                                                      fontStyle:
-                                                          FlutterFlowTheme.of(
-                                                                  context)
-                                                              .labelMedium
-                                                              .fontStyle,
-                                                    ),
-                                            hintText: 'Search',
-                                            hintStyle:
-                                                FlutterFlowTheme.of(context)
-                                                    .labelMedium
-                                                    .override(
-                                                      font: GoogleFonts.nunito(
-                                                        fontWeight:
-                                                            FlutterFlowTheme.of(
-                                                                    context)
-                                                                .labelMedium
-                                                                .fontWeight,
-                                                        fontStyle:
-                                                            FlutterFlowTheme.of(
-                                                                    context)
-                                                                .labelMedium
-                                                                .fontStyle,
-                                                      ),
-                                                      letterSpacing: 0.0,
-                                                      fontWeight:
-                                                          FlutterFlowTheme.of(
-                                                                  context)
-                                                              .labelMedium
-                                                              .fontWeight,
-                                                      fontStyle:
-                                                          FlutterFlowTheme.of(
-                                                                  context)
-                                                              .labelMedium
-                                                              .fontStyle,
-                                                    ),
-                                            enabledBorder: OutlineInputBorder(
-                                              borderSide: BorderSide(
-                                                color: Color(0x00000000),
-                                                width: 1.0,
-                                              ),
-                                              borderRadius:
-                                                  BorderRadius.circular(28.0),
-                                            ),
-                                            focusedBorder: OutlineInputBorder(
-                                              borderSide: BorderSide(
-                                                color: Color(0x00000000),
-                                                width: 1.0,
-                                              ),
-                                              borderRadius:
-                                                  BorderRadius.circular(28.0),
-                                            ),
-                                            errorBorder: OutlineInputBorder(
-                                              borderSide: BorderSide(
-                                                color:
-                                                    FlutterFlowTheme.of(context)
-                                                        .error,
-                                                width: 1.0,
-                                              ),
-                                              borderRadius:
-                                                  BorderRadius.circular(28.0),
-                                            ),
-                                            focusedErrorBorder:
-                                                OutlineInputBorder(
-                                              borderSide: BorderSide(
-                                                color:
-                                                    FlutterFlowTheme.of(context)
-                                                        .error,
-                                                width: 1.0,
-                                              ),
-                                              borderRadius:
-                                                  BorderRadius.circular(28.0),
-                                            ),
-                                            filled: true,
-                                            fillColor:
-                                                FlutterFlowTheme.of(context)
-                                                    .secondaryBackground,
-                                            prefixIcon: Icon(
-                                              Icons.search,
-                                            ),
-                                          ),
-                                          style: FlutterFlowTheme.of(context)
-                                              .bodyMedium
-                                              .override(
-                                                font: GoogleFonts.nunito(
-                                                  fontWeight:
-                                                      FlutterFlowTheme.of(
-                                                              context)
-                                                          .bodyMedium
-                                                          .fontWeight,
-                                                  fontStyle:
-                                                      FlutterFlowTheme.of(
-                                                              context)
-                                                          .bodyMedium
-                                                          .fontStyle,
-                                                ),
-                                                letterSpacing: 0.0,
-                                                fontWeight:
-                                                    FlutterFlowTheme.of(context)
-                                                        .bodyMedium
-                                                        .fontWeight,
-                                                fontStyle:
-                                                    FlutterFlowTheme.of(context)
-                                                        .bodyMedium
-                                                        .fontStyle,
-                                              ),
-                                          cursorColor:
-                                              FlutterFlowTheme.of(context)
-                                                  .primaryText,
-                                          enableInteractiveSelection: true,
-                                          validator: _model
-                                              .textControllerValidator
-                                              .asValidator(context),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                  Padding(
-                                    padding: EdgeInsetsDirectional.fromSTEB(
-                                        0.0, 8.0, 0.0, 8.0),
-                                    child: Container(
-                                      child: Text(
-                                        'Today, Oct 24',
-                                        style: FlutterFlowTheme.of(context)
-                                            .labelLarge
-                                            .override(
-                                              font: GoogleFonts.nunito(
-                                                fontWeight:
-                                                    FlutterFlowTheme.of(context)
-                                                        .labelLarge
-                                                        .fontWeight,
-                                                fontStyle:
-                                                    FlutterFlowTheme.of(context)
-                                                        .labelLarge
-                                                        .fontStyle,
-                                              ),
-                                              color:
-                                                  FlutterFlowTheme.of(context)
-                                                      .secondaryText,
-                                              letterSpacing: 0.0,
-                                              fontWeight:
-                                                  FlutterFlowTheme.of(context)
-                                                      .labelLarge
-                                                      .fontWeight,
-                                              fontStyle:
-                                                  FlutterFlowTheme.of(context)
-                                                      .labelLarge
-                                                      .fontStyle,
-                                              lineHeight: 1.4,
-                                            ),
-                                      ),
-                                    ),
-                                  ),
-                                  wrapWithModel(
-                                    model: _model.noteCardModel1,
-                                    updateCallback: () => safeSetState(() {}),
-                                    child: NoteCardWidget(
-                                      authorBg:
-                                          FlutterFlowTheme.of(context).primary,
-                                      authorInitials: 'S',
-                                      authorName: 'Sarah (Primary)',
-                                      content:
-                                          'Mom had a small appetite this morning. Ate about half of her breakfast (oatmeal with berries). Hydration is looking good today.',
-                                      time: '10:30 AM',
-                                      isPrivate: false,
-                                    ),
-                                  ),
-                                  wrapWithModel(
-                                    model: _model.noteCardModel2,
-                                    updateCallback: () => safeSetState(() {}),
-                                    child: NoteCardWidget(
-                                      authorBg: FlutterFlowTheme.of(context)
-                                          .secondary,
-                                      authorInitials: 'D',
-                                      authorName: 'David',
-                                      content:
-                                          'Helped her with the shower. She felt a bit dizzy at the end, so we sat for 10 minutes before heading back to the living room.',
-                                      time: '08:15 AM',
-                                      isPrivate: true,
-                                    ),
-                                  ),
-                                  Padding(
-                                    padding: EdgeInsetsDirectional.fromSTEB(
-                                        0.0, 16.0, 0.0, 8.0),
-                                    child: Container(
-                                      child: Text(
-                                        'Yesterday, Oct 23',
-                                        style: FlutterFlowTheme.of(context)
-                                            .labelLarge
-                                            .override(
-                                              font: GoogleFonts.nunito(
-                                                fontWeight:
-                                                    FlutterFlowTheme.of(context)
-                                                        .labelLarge
-                                                        .fontWeight,
-                                                fontStyle:
-                                                    FlutterFlowTheme.of(context)
-                                                        .labelLarge
-                                                        .fontStyle,
-                                              ),
-                                              color:
-                                                  FlutterFlowTheme.of(context)
-                                                      .secondaryText,
-                                              letterSpacing: 0.0,
-                                              fontWeight:
-                                                  FlutterFlowTheme.of(context)
-                                                      .labelLarge
-                                                      .fontWeight,
-                                              fontStyle:
-                                                  FlutterFlowTheme.of(context)
-                                                      .labelLarge
-                                                      .fontStyle,
-                                              lineHeight: 1.4,
-                                            ),
-                                      ),
-                                    ),
-                                  ),
-                                  wrapWithModel(
-                                    model: _model.noteCardModel3,
-                                    updateCallback: () => safeSetState(() {}),
-                                    child: NoteCardWidget(
-                                      authorBg:
-                                          FlutterFlowTheme.of(context).primary,
-                                      authorInitials: 'S',
-                                      authorName: 'Sarah (Primary)',
-                                      content:
-                                          'Blood pressure check: 138/82. A bit higher than her baseline, but she was feeling anxious after the phone call with the doctor.',
-                                      time: '04:45 PM',
-                                      isPrivate: false,
-                                    ),
-                                  ),
-                                  wrapWithModel(
-                                    model: _model.noteCardModel4,
-                                    updateCallback: () => safeSetState(() {}),
-                                    child: NoteCardWidget(
-                                      authorBg:
-                                          FlutterFlowTheme.of(context).tertiary,
-                                      authorInitials: 'E',
-                                      authorName: 'Nurse Emily',
-                                      content:
-                                          'Wound care performed on the left knee. No signs of infection. Redness is fading nicely. Recommended continuing the current supplement routine.',
-                                      time: '01:20 PM',
-                                      isPrivate: false,
-                                    ),
-                                  ),
-                                ].divide(SizedBox(height: 16.0)),
-                              ),
-                            ),
-                            Container(
-                              height: 40.0,
-                            ),
-                          ],
+        backgroundColor: theme.primaryBackground,
+        body: SafeArea(
+          child: SingleChildScrollView(
+            primary: false,
+            padding: EdgeInsetsDirectional.fromSTEB(20.0, 24.0, 20.0, 24.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Header row: title + menu button.
+                Row(
+                  mainAxisSize: MainAxisSize.max,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Text(
+                      'Care Notes',
+                      style: theme.headlineSmall.override(
+                        font: GoogleFonts.nunito(
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-            Align(
-              alignment: AlignmentDirectional(1.0, 1.0),
-              child: Container(
-                height: 120.0,
-                child: Padding(
-                  padding: EdgeInsets.all(24.0),
-                  child: Container(
-                    child: wrapWithModel(
-                      model: _model.buttonModel,
-                      updateCallback: () => safeSetState(() {}),
-                      child: ButtonWidget(
-                        icon: Icon(
-                          Icons.add_rounded,
-                          color: FlutterFlowTheme.of(context).primaryText,
-                          size: 24.0,
-                        ),
-                        iconPresent: true,
-                        iconEndPresent: false,
-                        content: 'Add Note',
-                        variant: 'primary',
-                        size: 'large',
-                        fullWidth: false,
-                        loading: false,
-                        disabled: false,
+                    FlutterFlowIconButton(
+                      borderRadius: 28.0,
+                      buttonSize: 40.0,
+                      fillColor: theme.secondaryBackground,
+                      icon: Icon(
+                        Icons.menu,
+                        color: theme.secondaryText,
+                        size: 24.0,
                       ),
+                      onPressed: () => _openMenu(context),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8.0),
+                // Which patient these notes belong to.
+                if (selected != null)
+                  StreamBuilder<CareRecipientsRecord>(
+                    stream: CareRecipientsRecord.getDocument(selected),
+                    builder: (context, snapshot) {
+                      if (snapshot.hasData) {
+                        final name = snapshot.data!.name;
+                        if (name.isNotEmpty && name != _patientName) {
+                          _patientName = name;
+                        }
+                        return Text(
+                          'Notes for ${name.isEmpty ? 'this care recipient' : name}',
+                          style: theme.bodyMedium.override(
+                            font: GoogleFonts.nunito(),
+                            color: theme.secondaryText,
+                          ),
+                        );
+                      }
+                      return Text(
+                        'Notes for this care recipient',
+                        style: theme.bodyMedium.override(
+                          font: GoogleFonts.nunito(),
+                          color: theme.secondaryText,
+                        ),
+                      );
+                    },
+                  )
+                else
+                  Text(
+                    'Select a care recipient to view and add notes.',
+                    style: theme.bodyMedium.override(
+                      font: GoogleFonts.nunito(),
+                      color: theme.secondaryText,
+                    ),
+                  ),
+                const SizedBox(height: 20.0),
+                // Composer: write a new note.
+                Container(
+                  decoration: BoxDecoration(
+                    color: theme.secondaryBackground,
+                    borderRadius: BorderRadius.circular(20.0),
+                    shape: BoxShape.rectangle,
+                  ),
+                  padding: EdgeInsets.all(16.0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      TextField(
+                        controller: _model.textController,
+                        focusNode: _model.textFieldFocusNode,
+                        autofocus: false,
+                        maxLines: 4,
+                        minLines: 2,
+                        decoration: InputDecoration(
+                          hintText: 'Write a care note…',
+                          hintStyle: theme.bodyMedium.override(
+                            font: GoogleFonts.nunito(),
+                            color: theme.secondaryText,
+                          ),
+                          filled: true,
+                          fillColor: theme.primaryBackground,
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 16.0,
+                            vertical: 12.0,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16.0),
+                            borderSide: BorderSide.none,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12.0),
+                      Align(
+                        alignment: AlignmentDirectional(1.0, 0.0),
+                        child: FFButtonWidget(
+                          onPressed: () => _addNote(context),
+                          text: 'Add Note',
+                          icon: const Icon(
+                            Icons.add_rounded,
+                            size: 20.0,
+                          ),
+                          options: FFButtonOptions(
+                            width: 150.0,
+                            height: 44.0,
+                            padding: EdgeInsetsDirectional.fromSTEB(
+                                16.0, 0.0, 16.0, 0.0),
+                            color: theme.primary,
+                            textStyle: theme.titleSmall.override(
+                              font: GoogleFonts.dmSans(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            borderRadius: BorderRadius.circular(20.0),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 28.0),
+                Text(
+                  'All Notes',
+                  style: theme.titleMedium.override(
+                    font: GoogleFonts.nunito(
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
-              ),
+                const SizedBox(height: 12.0),
+                // The notes list — a real stream, not a single record.
+                StreamBuilder<List<CareNotesRecord>>(
+                  stream: selected == null
+                      ? Stream<List<CareNotesRecord>>.value(const [])
+                      : queryCareNotesRecord(
+                          queryBuilder: (careNotesRecord) => careNotesRecord
+                              .where(
+                                'careRecipientRef',
+                                isEqualTo: selected,
+                              )
+                              .orderBy('createdAt', descending: true),
+                        ),
+                  builder: (context, snapshot) {
+                    if (snapshot.hasError) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 24.0),
+                        child: Text(
+                          'Could not load notes. Please try again.',
+                          textAlign: TextAlign.center,
+                          style: theme.bodyMedium.override(
+                            font: GoogleFonts.nunito(),
+                            color: theme.secondaryText,
+                          ),
+                        ),
+                      );
+                    }
+                    if (!snapshot.hasData) {
+                      return Center(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 48.0),
+                          child: SizedBox(
+                            width: 40.0,
+                            height: 40.0,
+                            child: CircularProgressIndicator(
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                theme.primary,
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }
+                    final notes = snapshot.data!;
+                    if (notes.isEmpty) {
+                      return Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(vertical: 32.0),
+                        decoration: BoxDecoration(
+                          color: theme.secondaryBackground,
+                          borderRadius: BorderRadius.circular(20.0),
+                          shape: BoxShape.rectangle,
+                        ),
+                        child: Text(
+                          'No notes yet. Add your first note above.',
+                          textAlign: TextAlign.center,
+                          style: theme.bodyMedium.override(
+                            font: GoogleFonts.nunito(),
+                            color: theme.secondaryText,
+                          ),
+                        ),
+                      );
+                    }
+                    final cards = <Widget>[];
+                    for (var i = 0; i < notes.length; i++) {
+                      cards.add(_buildNoteCard(context, notes[i], _patientName));
+                      if (i < notes.length - 1) {
+                        cards.add(const SizedBox(height: 12.0));
+                      }
+                    }
+                    return Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: cards,
+                    );
+                  },
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
