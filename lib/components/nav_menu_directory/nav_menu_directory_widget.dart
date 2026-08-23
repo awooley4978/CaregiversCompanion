@@ -145,7 +145,7 @@ class _NavMenuDirectoryWidgetState extends State<NavMenuDirectoryWidget> {
                             highlightColor: Colors.transparent,
                             onTap: () async {
                               context
-                                  .pushNamed(BCareProfileSetupWidget.routeName);
+                                  .pushNamed(AClientDirectoryWidget.routeName);
                             },
                             child: Text(
                               'MENU',
@@ -182,7 +182,7 @@ class _NavMenuDirectoryWidgetState extends State<NavMenuDirectoryWidget> {
                             highlightColor: Colors.transparent,
                             onTap: () async {
                               context
-                                  .pushNamed(BCareProfileSetupWidget.routeName);
+                                  .pushNamed(AClientDirectoryWidget.routeName);
                             },
                             child: Text(
                               'People',
@@ -358,7 +358,7 @@ class _NavMenuDirectoryWidgetState extends State<NavMenuDirectoryWidget> {
                             highlightColor: Colors.transparent,
                             onTap: () async {
                               context
-                                  .pushNamed(BCareProfileSetupWidget.routeName);
+                                  .pushNamed(CDailyDashboardWidget.routeName);
                             },
                             child: Text(
                               'Daily Care',
@@ -666,7 +666,7 @@ class _NavMenuDirectoryWidgetState extends State<NavMenuDirectoryWidget> {
                             highlightColor: Colors.transparent,
                             onTap: () async {
                               context
-                                  .pushNamed(BCareProfileSetupWidget.routeName);
+                                  .pushNamed(HWeeklySummaryReportWidget.routeName);
                             },
                             child: Text(
                               'Reports',
@@ -912,7 +912,7 @@ class _NavMenuDirectoryWidgetState extends State<NavMenuDirectoryWidget> {
                             highlightColor: Colors.transparent,
                             onTap: () async {
                               context
-                                  .pushNamed(BCareProfileSetupWidget.routeName);
+                                  .pushNamed(SettingsAccountWidget.routeName);
                             },
                             child: Text(
                               'Settings',
