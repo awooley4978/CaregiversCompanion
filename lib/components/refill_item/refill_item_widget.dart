@@ -1,11 +1,15 @@
+import '/backend/pharmacy/pharmacy_service.dart';
 import '/components/button/button_widget.dart';
+import '/components/pharmacy_picker/pharmacy_picker.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/flutter_flow_widgets.dart';
 import 'dart:ui';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'refill_item_model.dart';
 export 'refill_item_model.dart';
 
@@ -49,6 +53,52 @@ class _RefillItemWidgetState extends State<RefillItemWidget> {
     _model.maybeDispose();
 
     super.dispose();
+  }
+
+  /// Medication "Order"/"Reorder" handoff.
+  ///
+  ///  * No pharmacy set -> prompt the user to choose one (never do nothing).
+  ///  * Pharmacy set -> hand OFF to that pharmacy's own refill/prescription
+  ///    webpage in a new tab. The app does NOT place, and does not represent
+  ///    itself as placing, a prescription order. No user/sensitive data is
+  ///    sent to the page.
+  Future<void> _handleOrder() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || !mounted) return;
+
+    final service = PharmacyService();
+    var pref = await service.getPreferredPharmacy(uid);
+
+    if (pref.id == null || pref.id!.isEmpty) {
+      // Owner req 4: prompt to choose rather than doing nothing.
+      final choice = await showPreferredPharmacyPicker(context);
+      if (choice == null || !mounted) {
+        return; // User dismissed — no pharmacy chosen, no handoff.
+      }
+      await service.setPreferredPharmacy(
+        uid,
+        id: choice.id,
+        label: choice.label,
+      );
+      pref = (id: choice.id, label: choice.label);
+    }
+
+    final url = pharmacyRefillUrl(pref.id, pref.label);
+    if (!mounted) return;
+    if (await launchUrl(
+      Uri.parse(url),
+      mode: LaunchMode.externalApplication,
+      webOnlyWindowName: '_blank',
+    )) {
+      showSnackbar(
+        context,
+        'Opening ${pharmacyDisplayName(pref.id, pref.label)} to refill this '
+        'prescription. ${pharmacyDisplayName(pref.id, pref.label)} handles '
+        'your order — we never place it for you.',
+      );
+    } else {
+      showSnackbar(context, 'Could not open the pharmacy page. Please try again.');
+    }
   }
 
   @override
@@ -152,6 +202,7 @@ class _RefillItemWidgetState extends State<RefillItemWidget> {
                       fullWidth: false,
                       loading: false,
                       disabled: false,
+                      onPressed: _handleOrder,
                     ),
                   ),
                 ].divide(SizedBox(width: 16.0)),
