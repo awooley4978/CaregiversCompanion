@@ -7,7 +7,6 @@
 //     pharmacy (owner req 4) and launches nothing.
 //   * A pharmacy IS set -> tapping Order HANDS OFF (launches) that pharmacy's
 //     refill page URL (owner req 3/7).
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';

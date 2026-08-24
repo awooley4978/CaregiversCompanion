@@ -298,7 +298,7 @@ void showSnackbar(
                 ),
               ),
             ),
-          Text(message),
+          Expanded(child: Text(message)),
         ],
       ),
       duration: Duration(seconds: duration),
