@@ -22,6 +22,7 @@ class ButtonWidget extends StatefulWidget {
     bool? fullWidth,
     bool? loading,
     bool? disabled,
+    this.onPressed,
   })  : this.iconPresent = iconPresent ?? false,
         this.iconEndPresent = iconEndPresent ?? false,
         this.content = content ?? 'Save Profile',
@@ -41,6 +42,8 @@ class ButtonWidget extends StatefulWidget {
   final bool fullWidth;
   final bool loading;
   final bool disabled;
+  /// Optional tap action. When null (existing behavior) the button is inert.
+  final VoidCallback? onPressed;
 
   @override
   State<ButtonWidget> createState() => _ButtonWidgetState();
@@ -72,7 +75,10 @@ class _ButtonWidgetState extends State<ButtonWidget> {
 
   @override
   Widget build(BuildContext context) {
-    return Opacity(
+    final canTap = widget!.onPressed != null &&
+        !(widget!.disabled ?? false) &&
+        !(widget!.loading ?? false);
+    final child = Opacity(
       opacity: valueOrDefault<double>(
         valueOrDefault<bool>(
           widget!.disabled,
@@ -448,6 +454,13 @@ class _ButtonWidgetState extends State<ButtonWidget> {
           ],
         ),
       ),
+    );
+    if (!canTap) {
+      return child;
+    }
+    return GestureDetector(
+      onTap: widget!.onPressed,
+      child: child,
     );
   }
 }

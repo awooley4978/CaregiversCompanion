@@ -1,3 +1,4 @@
+import '/components/pharmacy_setting_row/pharmacy_setting_row.dart';
 import '/components/switch_component/switch_component_widget.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
@@ -183,6 +184,13 @@ class _SettingsGroupChild2WidgetState extends State<SettingsGroupChild2Widget> {
             ),
           ),
         ),
+        const Divider(
+          height: 16.0,
+          thickness: 1.0,
+          indent: 24.0,
+          endIndent: 0.0,
+        ),
+        const PharmacySettingRow(),
       ],
     );
   }
