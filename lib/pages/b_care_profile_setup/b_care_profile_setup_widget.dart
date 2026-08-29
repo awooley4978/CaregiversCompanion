@@ -12,6 +12,7 @@ import '/flutter_flow/flutter_flow_widgets.dart';
 import 'dart:ui';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart' show FirebaseException;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -884,6 +885,16 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
                                   // entered form data: the text fields retain
                                   // their controllers, and we only surface a
                                   // clear message instead of wiping the form.
+                                  // But the failure must NOT be silent: log the
+                                  // real exception (Firestore code + message)
+                                  // so a non-membership failure (permission-
+                                  // denied, unavailable, invalid-argument, ...)
+                                  // is diagnosable instead of opaque.
+                                  debugPrint(
+                                    'CareProfileSetup: save failed '
+                                    '(non-membership): '
+                                    '${e is FirebaseException ? '${e.code}: ${e.message}' : e.toString()}',
+                                  );
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(
                                       content: Text(
