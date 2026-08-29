@@ -890,7 +890,7 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
                                   // so a non-membership failure (permission-
                                   // denied, unavailable, invalid-argument, ...)
                                   // is diagnosable instead of opaque.
-                                  debugPrint(
+                                  print(
                                     'CareProfileSetup: save failed '
                                     '(non-membership): '
                                     '${e is FirebaseException ? '${e.code}: ${e.message}' : e.toString()}',
