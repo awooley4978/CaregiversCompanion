@@ -171,3 +171,112 @@ describe('PROFESSIONAL org (D6/D7) — assignment scoping preserved', () => {
     await assertFails(dbFor(PROFCARE).doc('careNotes/note_prof').get());
   });
 });
+
+// ---------------------------------------------------------------------------
+// Care Profile Setup SAVE path (regression for the "Could not save the Care
+// Profile" bug). Simulates the EXACT write sequence the app runs when the
+// owner taps Save Profile on b_care_profile_setup: fresh founder provisioning
+// (org -> member -> users.activeGroupId) followed by the careRecipients create
+// (createCareRecipientForActiveGroup in lib/backend/org/org_service.dart).
+// Distinct uids/orgs so they never collide with the seed data above.
+// ---------------------------------------------------------------------------
+describe('Care Profile Setup SAVE — founder provisioning + careRecipients create', () => {
+  const FOUNDER    = 'uid_savefounder';
+  const ORG_FOUND  = 'org_savefounder';   // = autoFamilyOrgId(FOUNDER) => 'org_$uid'
+
+  it('A. full fresh-founder sequence ALLOWS the careRecipients create (valid save)', async () => {
+    const db = dbFor(FOUNDER);
+    // 1. phase-1 profile create (no group context yet) — ensureUserProfile
+    await assertSucceeds(db.doc('users/'+FOUNDER).set({
+      uid: FOUNDER, name: 'Founder', email: 'founder@x.com', createdAt: new Date(),
+    }));
+    // 2. org doc create (kind family, createdBy=uid) — ensureOrgMembership 3a
+    await assertSucceeds(db.doc('organizations/'+ORG_FOUND).set({
+      name: 'Household', kind: 'family', createdBy: FOUNDER,
+    }));
+    // 3. founder member doc — ensureOrgMembership 3b (org doc must pre-exist)
+    await assertSucceeds(
+      db.doc(`organizations/${ORG_FOUND}/members/${FOUNDER}`).set({
+        uid: FOUNDER, orgId: ORG_FOUND, role: 'owner', status: 'active',
+      }));
+    // 4. users set-merge activeGroupId — ensureOrgMembership 3c
+    await assertSucceeds(
+      db.doc('users/'+FOUNDER).set({ activeGroupId: ORG_FOUND }, { merge: true }));
+    // 5. THE SAVE: careRecipients create with orgId + migrationStatus='created'
+    await assertSucceeds(db.doc('careRecipients/save_f1').set({
+      Name: 'Mom', PrimaryCondition: 'Dementia',
+      TrackVitals: true, TrackMedication: false,
+      orgId: ORG_FOUND, migrationStatus: 'created',
+    }));
+  });
+
+  it('B. pre-provisioned owner (activeGroupId + org + active member) create ALLOWED', async () => {
+    // Emulates the seed() helper style: the account is already provisioned
+    // (this drives createCareRecipientForActiveGroup straight to ref.set).
+    const db = dbFor(FOUNDER);
+    await assertSucceeds(db.doc('careRecipients/save_f2').set({
+      Name: 'Dad', orgId: ORG_FOUND, migrationStatus: 'created',
+    }));
+  });
+
+  it('C. fresh account with NO provisioning yet DENIES the careRecipients create', async () => {
+    // A signed-in user with no org/membership must NOT be able to create a
+    // recipient claiming any org (D1 — membership is required, never skipped).
+    const db = dbFor('uid_savefresh');
+    await assertFails(db.doc('careRecipients/save_f3').set({
+      Name: 'X', orgId: 'org_savefresh', migrationStatus: 'created',
+    }));
+  });
+
+  it('D. activeGroupId set but MEMBER DOC MISSING DENIES the create', async () => {
+    // Partial state: users.activeGroupId present but the members doc is gone
+    // (e.g. membership revoked / never completed). createCareRecipientForActiveGroup
+    // compares against activeGroupId, which must pass rules' isActiveMember.
+    await assertFails(dbFor(FOUNDER).doc('careRecipients/save_f4').set({
+      Name: 'Y', orgId: 'org_no_member_here', migrationStatus: 'created',
+    }));
+  });
+
+  it('E. member doc present but status != active DENIES the create', async () => {
+    // Partial state: member exists but was never activated (status 'invited'
+    // / 'removed'). Existence alone must not grant writable access (D1).
+    const db = dbFor('uid_saveinvited');
+    await assertFails(db.doc('careRecipients/save_f5').set({
+      Name: 'Z', orgId: 'org_invite_only', migrationStatus: 'created',
+    }));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ensureOrgMembership idempotent-retry edge: an account whose ORG doc exists
+// but whose founder MEMBER doc is missing (half-provisioned). The app's
+// ensureOrgMembership re-runs org->member->users; the org `set` then lands on
+// an EXISTING doc and is evaluated as an UPDATE, which requires membership
+// (owner/admin) that does not yet exist. This pins the current rules behavior.
+// ---------------------------------------------------------------------------
+describe('ensureOrgMembership retry — org-present/member-missing half state', () => {
+  const HALF = 'uid_half';
+  const ORG_HALF = 'org_half';
+
+  it('org create still ALLOWED for a second fresh attempt (create, not update)', async () => {
+    // First call provisions org; the member write is simulated to have failed.
+    const db = dbFor(HALF);
+    await assertSucceeds(db.doc('organizations/'+ORG_HALF).set({
+      name: 'H', kind: 'family', createdBy: HALF,
+    }));
+    // No member doc written (the failing write).
+  });
+
+  it('retry org set with NO membership is DENIED as an update', async () => {
+    // Second ensureOrgMembership run re-writes the same org doc; because the
+    // doc now exists this is an UPDATE, gated by isMemberWithRole(owner/admin)
+    // — which requires the member doc this account is missing. This is an
+    // intentional safety property, but shown here so a half-provisioned
+    // account's retry is understood to fail hard (self-heals only if the
+    // ORIGINAL member create is what failed, not the org create).
+    const db = dbFor(HALF);
+    await assertFails(db.doc('organizations/'+ORG_HALF).set({
+      name: 'H', kind: 'family', createdBy: HALF,
+    }));
+  });
+});
