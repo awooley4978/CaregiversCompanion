@@ -71,6 +71,25 @@ class OrgAccessDeniedException implements Exception {
   String toString() => 'OrgAccessDeniedException: $message';
 }
 
+/// Thrown by the instrumented save path when a specific Firestore operation
+/// fails, carrying the step label and the underlying cause so the UI can
+/// surface EXACTLY which step was denied (with code + message) without needing
+/// devtools. `toString()` renders `SaveStepException[<step>]: <code>: <message>`
+/// when the cause is a `FirebaseException`, else `SaveStepException[<step>]: <cause>`.
+class SaveStepException implements Exception {
+  SaveStepException(this.step, this.cause);
+  final String step;
+  final Object cause;
+  @override
+  String toString() {
+    if (cause is FirebaseException) {
+      final e = cause as FirebaseException;
+      return 'SaveStepException[$step]: ${e.code}: ${e.message}';
+    }
+    return 'SaveStepException[$step]: $cause';
+  }
+}
+
 /// Deterministic org id for the auto-provisioned family org.
 ///
 /// Deriving the id from the founder's uid is what makes provisioning
@@ -166,36 +185,77 @@ Future<String> ensureOrgMembership(User user) async {
   // 1. Fast path: the profile already carries a group context. Verify it is
   //    still backed by an active membership (a stale context after removal
   //    must not be trusted on its own — D1: context is never authorization).
-  final activeGroupId = await getActiveGroupId(uid);
-  if (activeGroupId != null && activeGroupId.isNotEmpty) {
-    if (await isActiveMember(activeGroupId, uid)) {
-      return activeGroupId;
+  // E1: fast-path getActiveGroupId.
+  try {
+    print('SAVE-STEP E1 getActiveGroupId: uid=$uid');
+    final activeGroupId = await getActiveGroupId(uid);
+    print('SAVE-STEP E1 getActiveGroupId -> activeGroupId=$activeGroupId');
+    if (activeGroupId != null && activeGroupId.isNotEmpty) {
+      // E2: verify that group context is backed by an active membership.
+      try {
+        print('SAVE-STEP E2 isActiveMember: orgId=$activeGroupId uid=$uid');
+        final ok = await isActiveMember(activeGroupId, uid);
+        print('SAVE-STEP E2 isActiveMember -> $ok');
+        if (ok) {
+          print('SAVE-STEP E2 fast-path RETURN orgId=$activeGroupId');
+          return activeGroupId;
+        }
+      } on FirebaseException catch (e) {
+        print('SAVE-STEP E2 FAILED: ${e.code} — ${e.message}');
+        throw SaveStepException('E2', e);
+      }
     }
+  } on FirebaseException catch (e) {
+    print('SAVE-STEP E1 FAILED: ${e.code} — ${e.message}');
+    throw SaveStepException('E1', e);
   }
 
   // 2. activeGroupId missing (or stale): restore from an existing membership.
   //    a. Our own deterministic family org (the common case).
   final ownOrgId = autoFamilyOrgId(uid);
-  if (await isActiveMember(ownOrgId, uid)) {
-    await usersDoc.set({'activeGroupId': ownOrgId}, SetOptions(merge: true));
-    return ownOrgId;
+  try {
+    print('SAVE-STEP E2 isActiveMember: orgId=$ownOrgId uid=$uid');
+    if (await isActiveMember(ownOrgId, uid)) {
+      print('SAVE-STEP E2 isActiveMember -> true');
+      // E6: users/{uid} set-merge (activeGroupId).
+      print('SAVE-STEP E6 users set-merge activeGroupId=$ownOrgId');
+      await usersDoc.set({'activeGroupId': ownOrgId}, SetOptions(merge: true));
+      print('SAVE-STEP E6 users set-merge -> OK RETURN orgId=$ownOrgId');
+      return ownOrgId;
+    }
+    print('SAVE-STEP E2 isActiveMember -> false');
+  } on FirebaseException catch (e) {
+    print('SAVE-STEP E2 FAILED: ${e.code} — ${e.message}');
+    throw SaveStepException('E2', e);
   }
   //    b. Any other org the user was added to (e.g. accepted an invite into
   //       someone else's household before their own org was created). Rules
   //       cannot enumerate memberships (§2.2), so this is a collectionGroup
   //       query scoped by the user's uid.
-  final anyMembership = await FirebaseFirestore.instance
-      .collectionGroup('members')
-      .where('uid', isEqualTo: uid)
-      .where('status', isEqualTo: kMemberStatusActive)
-      .limit(1)
-      .get();
-  if (anyMembership.docs.isNotEmpty) {
-    final memberPath = anyMembership.docs.first.reference.path;
-    // organizations/{orgId}/members/{uid} -> orgId is segment 1.
-    final orgId = memberPath.split('/')[1];
-    await usersDoc.set({'activeGroupId': orgId}, SetOptions(merge: true));
-    return orgId;
+  try {
+    // E3: collectionGroup 'members' query (print match count).
+    print('SAVE-STEP E3 collectionGroup members query: uid=$uid');
+    final anyMembership = await FirebaseFirestore.instance
+        .collectionGroup('members')
+        .where('uid', isEqualTo: uid)
+        .where('status', isEqualTo: kMemberStatusActive)
+        .limit(1)
+        .get();
+    print(
+        'SAVE-STEP E3 collectionGroup -> matchCount=${anyMembership.docs.length}');
+    if (anyMembership.docs.isNotEmpty) {
+      final memberPath = anyMembership.docs.first.reference.path;
+      // organizations/{orgId}/members/{uid} -> orgId is segment 1.
+      final orgId = memberPath.split('/')[1];
+      // E6: users/{uid} set-merge (activeGroupId).
+      print('SAVE-STEP E6 users set-merge activeGroupId=$orgId');
+      await usersDoc.set({'activeGroupId': orgId}, SetOptions(merge: true));
+      print('SAVE-STEP E6 users set-merge -> OK RETURN orgId=$orgId');
+      return orgId;
+    }
+  } on FirebaseException catch (e) {
+    print('SAVE-STEP E3 FAILED: ${e.code} — ${e.message}');
+    throw SaveStepException('E3', e);
   }
 
   // 3. No membership anywhere: this is a genuine first sign-in. Provision
@@ -204,33 +264,46 @@ Future<String> ensureOrgMembership(User user) async {
   final orgId = ownOrgId;
   final orgRef = orgs.doc(orgId);
 
-  // 3a. Org doc first (two sequential writes, not a batch — see above).
-  await orgRef.set({
-    ...createOrganizationsRecordData(
-      name: kFamilyOrgName,
-      kind: kFamilyOrgKind,
-      createdBy: uid,
-    ),
-    'createdAt': FieldValue.serverTimestamp(),
-  });
+  try {
+    // E4: org doc first (two sequential writes, not a batch — see above).
+    print('SAVE-STEP E4 org create: orgId=$orgId');
+    await orgRef.set({
+      ...createOrganizationsRecordData(
+        name: kFamilyOrgName,
+        kind: kFamilyOrgKind,
+        createdBy: uid,
+      ),
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    print('SAVE-STEP E4 org create -> OK');
 
-  // 3b. Founder membership second (org doc is visible to rules by now).
-  await orgRef.collection('members').doc(uid).set({
-    ...createMembersRecordData(
-      uid: uid,
-      orgId: orgId,
-      role: kRoleOwner,
-      status: kMemberStatusActive,
-      displayName: (user.displayName ?? '').trim().isNotEmpty
-          ? user.displayName!.trim()
-          : null,
-      email: (user.email ?? '').trim().isNotEmpty ? user.email!.trim() : null,
-    ),
-    'joinedAt': FieldValue.serverTimestamp(),
-  });
+    // E5: founder membership second (org doc visible to rules by now).
+    print('SAVE-STEP E5 member create: orgId=$orgId uid=$uid');
+    await orgRef.collection('members').doc(uid).set({
+      ...createMembersRecordData(
+        uid: uid,
+        orgId: orgId,
+        role: kRoleOwner,
+        status: kMemberStatusActive,
+        displayName: (user.displayName ?? '').trim().isNotEmpty
+            ? user.displayName!.trim()
+            : null,
+        email: (user.email ?? '').trim().isNotEmpty
+            ? user.email!.trim()
+            : null,
+      ),
+      'joinedAt': FieldValue.serverTimestamp(),
+    });
+    print('SAVE-STEP E5 member create -> OK');
 
-  // 3c. Set the group context (merge — never clobber the profile).
-  await usersDoc.set({'activeGroupId': orgId}, SetOptions(merge: true));
+    // E6: set the group context (merge — never clobber the profile).
+    print('SAVE-STEP E6 users set-merge activeGroupId=$orgId');
+    await usersDoc.set({'activeGroupId': orgId}, SetOptions(merge: true));
+    print('SAVE-STEP E6 users set-merge -> OK RETURN orgId=$orgId');
+  } on FirebaseException catch (e) {
+    print('SAVE-STEP E4/E5/E6 FAILED: ${e.code} — ${e.message}');
+    throw SaveStepException('E4/E5/E6', e);
+  }
 
   return orgId;
 }
@@ -367,30 +440,58 @@ Future<DocumentReference<Map<String, dynamic>>> createCareRecipientForActiveGrou
   // verifies membership AND persists `users/{uid}.activeGroupId`) whenever the
   // profile is missing its group context.
   final String orgId;
-  final existing = await getActiveGroupId(uid);
-  if (existing != null && existing.isNotEmpty) {
-    orgId = existing;
-  } else {
-    orgId = await ensureOrgMembership(user);
+  try {
+    // S1: getActiveGroupId (fresh read of users/{uid}.activeGroupId).
+    print('SAVE-STEP S1 getActiveGroupId: uid=$uid');
+    final existing = await getActiveGroupId(uid);
+    print('SAVE-STEP S1 getActiveGroupId -> activeGroupId=$existing');
+    if (existing != null && existing.isNotEmpty) {
+      orgId = existing;
+    } else {
+      // S2: ensureOrgMembership (restore an existing org/membership, or
+      // provision a new family org on genuine first sign-in).
+      print('SAVE-STEP S2 ensureOrgMembership: uid=$uid (activeGroupId missing)');
+      orgId = await ensureOrgMembership(user);
+      print('SAVE-STEP S2 ensureOrgMembership -> orgId=$orgId');
+    }
+  } on FirebaseException catch (e) {
+    print('SAVE-STEP S1/S2 FAILED: ${e.code} — ${e.message}');
+    throw SaveStepException('S1/S2', e);
   }
-  if (!await isActiveMember(orgId, uid)) {
-    throw OrgAccessDeniedException(
-        'Your membership in this care circle could not be verified, so the '
-        'profile was not saved.');
+  try {
+    // S3: isActiveMember — verify active membership in [orgId] BEFORE write.
+    print('SAVE-STEP S3 isActiveMember: orgId=$orgId uid=$uid');
+    final active = await isActiveMember(orgId, uid);
+    print('SAVE-STEP S3 isActiveMember -> $active');
+    if (!active) {
+      throw OrgAccessDeniedException(
+          'Your membership in this care circle could not be verified, so the '
+          'profile was not saved.');
+    }
+  } on FirebaseException catch (e) {
+    print('SAVE-STEP S3 FAILED: ${e.code} — ${e.message}');
+    throw SaveStepException('S3', e);
   }
-  // Go through FirebaseFirestore directly (NOT the record's raw-typed
-  // `collection` getter) so the reference is DocumentReference<Map<String,
-  // dynamic>> and matches the declared return type.
-  final ref = FirebaseFirestore.instance.collection('careRecipients').doc();
-  await ref.set({
-    ...data,
-    'orgId': orgId,
-    // §5.1(c).5: the app writes 'created' on every NEW doc (rules ignore it;
-    // read by the app only for UI hints). Legacy docs get 'claimed' from the
-    // one-time claim script (scripts/claim_legacy_data.dart).
-    'migrationStatus': kMigrationStatusCreated,
-  });
-  return ref;
+  try {
+    // S4: careRecipients doc create. Go through FirebaseFirestore directly
+    // (NOT the record's raw-typed `collection` getter) so the reference is
+    // DocumentReference<Map<String, dynamic>> and matches the declared type.
+    final ref = FirebaseFirestore.instance.collection('careRecipients').doc();
+    print('SAVE-STEP S4 careRecipients.create: orgId=$orgId docId=${ref.id}');
+    await ref.set({
+      ...data,
+      'orgId': orgId,
+      // §5.1(c).5: the app writes 'created' on every NEW doc (rules ignore it;
+      // read by the app only for UI hints). Legacy docs get 'claimed' from the
+      // one-time claim script (scripts/claim_legacy_data.dart).
+      'migrationStatus': kMigrationStatusCreated,
+    });
+    print('SAVE-STEP S4 careRecipients.create -> OK docId=${ref.id}');
+    return ref;
+  } on FirebaseException catch (e) {
+    print('SAVE-STEP S4 FAILED: ${e.code} — ${e.message}');
+    throw SaveStepException('S4', e);
+  }
 }
 
 // ---------------------------------------------------------------------------

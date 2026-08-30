@@ -880,6 +880,20 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(content: Text(e.message)),
                                   );
+                                } on SaveStepException catch (e) {
+                                  // A SaveStepException carries the exact step
+                                  // label + Firestore code + message, so the
+                                  // owner can read WHICH operation was denied
+                                  // straight from the snackbar, no devtools.
+                                  print(
+                                    'CareProfileSetup: save failed (step $e)',
+                                  );
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                          'Could not save at step ${e.step}: $e'),
+                                    ),
+                                  );
                                 } catch (e) {
                                   // A failed save must never destroy the
                                   // entered form data: the text fields retain
