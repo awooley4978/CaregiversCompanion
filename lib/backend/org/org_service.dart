@@ -164,10 +164,15 @@ Future<OrganizationsRecord?> getOrganization(String orgId) async {
 ///    no-op. A crash between steps self-heals on the next sign-in (org
 ///    exists but member missing -> the create path completes the missing
 ///    docs).
-///  * A transaction was deliberately avoided: the "does the user already
-///    belong to ANY org?" check is a collection-group QUERY (rules cannot
-///    enumerate memberships — §2.2), and Firestore transactions cannot run
-///    queries. Sequencing is also required by the Phase-4 rules: the org doc
+///  * Provisioning is purely DETERMINISTIC via the user's own org
+///    (`org_<uid>`): restore or create that org and its founder membership,
+///    then set `users/{uid}.activeGroupId`. There is deliberately NO
+///    membership-enumeration query — a collection-group `members` query is
+///    structurally denied by the Phase-4 read rules (rules cannot enumerate
+///    memberships — §2.2), so step 2 settles to the user's own deterministic
+///    org rather than querying for any other membership. Transfers into orgs
+///    outside the user's own are handled by the separate invite-acceptance
+///    path. Sequencing is also required by the Phase-4 rules: the org doc
 ///    is written BEFORE the founder member doc (two sequential writes, not
 ///    one batch), because rules evaluate batch writes against pre-batch
 ///    state and each create rule must see the sibling doc it depends on.
@@ -227,35 +232,6 @@ Future<String> ensureOrgMembership(User user) async {
   } on FirebaseException catch (e) {
     print('SAVE-STEP E2 FAILED: ${e.code} — ${e.message}');
     throw SaveStepException('E2', e);
-  }
-  //    b. Any other org the user was added to (e.g. accepted an invite into
-  //       someone else's household before their own org was created). Rules
-  //       cannot enumerate memberships (§2.2), so this is a collectionGroup
-  //       query scoped by the user's uid.
-  try {
-    // E3: collectionGroup 'members' query (print match count).
-    print('SAVE-STEP E3 collectionGroup members query: uid=$uid');
-    final anyMembership = await FirebaseFirestore.instance
-        .collectionGroup('members')
-        .where('uid', isEqualTo: uid)
-        .where('status', isEqualTo: kMemberStatusActive)
-        .limit(1)
-        .get();
-    print(
-        'SAVE-STEP E3 collectionGroup -> matchCount=${anyMembership.docs.length}');
-    if (anyMembership.docs.isNotEmpty) {
-      final memberPath = anyMembership.docs.first.reference.path;
-      // organizations/{orgId}/members/{uid} -> orgId is segment 1.
-      final orgId = memberPath.split('/')[1];
-      // E6: users/{uid} set-merge (activeGroupId).
-      print('SAVE-STEP E6 users set-merge activeGroupId=$orgId');
-      await usersDoc.set({'activeGroupId': orgId}, SetOptions(merge: true));
-      print('SAVE-STEP E6 users set-merge -> OK RETURN orgId=$orgId');
-      return orgId;
-    }
-  } on FirebaseException catch (e) {
-    print('SAVE-STEP E3 FAILED: ${e.code} — ${e.message}');
-    throw SaveStepException('E3', e);
   }
 
   // 3. No membership anywhere: this is a genuine first sign-in. Provision

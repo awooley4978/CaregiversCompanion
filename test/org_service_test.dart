@@ -113,8 +113,8 @@ void main() {
       expect(orgCount(), 1);
     });
 
-    test('does NOT create a new org for a user already in another org',
-        () async {
+    test('still provisions the deterministic own org even when already a '
+        'member of another org (no membership enumeration)', () async {
       // Seed: user u9 was already added to someone else's org (e.g. accepted
       // an invite) but has no activeGroupId.
       final owner = await signIn('u8', email: 'owner8@example.com');
@@ -135,10 +135,16 @@ void main() {
       final orgId =
           await ensureOrgMembership(await signIn('u9', email: 'invitee9@example.com'));
 
-      // Restored to the existing membership; no new org was auto-created.
-      expect(orgId, 'org_u8');
-      expect(orgCount(), 1);
-      expect(docData('users/u9')!['activeGroupId'], 'org_u8');
+      // Provisioning is purely deterministic via org_<uid>: the Phase-4 rules
+      // deny membership-enumeration queries, so ensureOrgMembership does NOT
+      // discover the external org_u8 membership. It creates u9's own org and
+      // sets activeGroupId to it. The external membership is preserved as-is
+      // and is reconciled separately by the invite-acceptance path.
+      expect(orgId, 'org_u9');
+      expect(orgCount(), 2); // org_u8 (seeded) + org_u9 (provisioned here).
+      expect(docData('users/u9')!['activeGroupId'], 'org_u9');
+      // Existing external membership is untouched.
+      expect(docData('organizations/org_u8/members/u9'), isNotNull);
     });
 
     test('self-heals a partially provisioned org (member write lost)', () async {
