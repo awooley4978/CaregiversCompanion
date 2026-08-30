@@ -122,6 +122,28 @@ describe('OWNER of recipient org (family) — previously-failing + unchanged', (
   });
 });
 
+// ---------------------------------------------------------------------------
+// careRecipients LIST QUERY — collection query `where('orgId' == activeGroup)`
+// vs single-doc GET. Regression pin for the app's exact read path
+// (careRecipientsForActiveGroup -> queryCareRecipientsRecord with
+// q.where('orgId', isEqualTo: activeGroupId)). The READ rule
+// (canAccessRecipientRef -> recipientOrgId) derives the recipient's orgId via
+// a get() on the candidate doc, which Firestore cannot prove holds for every
+// candidate row of a collection query, so the query is expected to be DENIED
+// even though the same doc's single GET is ALLOWED. This pins that behavior.
+// ---------------------------------------------------------------------------
+describe('OWNER — careRecipients LIST QUERY (collection where orgId) vs single-doc GET', () => {
+  it('A. single-doc GET of own-org recipient ALLOWED', async () => {
+    await assertSucceeds(dbFor(OWNER).doc('careRecipients/'+REC_F1).get());
+  });
+  it('B. collection query careRecipients where orgId==activeGroup is DENIED', async () => {
+    const q = dbFor(OWNER)
+      .collection('careRecipients')
+      .where('orgId', '==', ORG_FAM);
+    await assertFails(q.get());
+  });
+});
+
 // ---------------------------------------------------------------- GRANTEE (share)
 describe('GRANTEE (recipientShares share to org_fam recipient)', () => {
   it('recipient data accessible via active share', async () => {

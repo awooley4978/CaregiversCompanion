@@ -334,12 +334,31 @@ Stream<List<CareRecipientsRecord>> careRecipientsForActiveGroup({
   if (orgId == null || orgId.isEmpty) {
     return Stream.value(const []);
   }
-  return queryCareRecipientsRecord(
+  final stream = queryCareRecipientsRecord(
     queryBuilder: (q) {
       final scoped = q.where('orgId', isEqualTo: orgId);
       return queryBuilder == null ? scoped : queryBuilder(scoped);
     },
     limit: limit,
+  );
+  // Instrument the list/search read path so a rules-permission failure is
+  // VISIBLE instead of a silent spin/empty state. Errors are logged with the
+  // FirebaseException code+message (e.g. permission-denied) and re-emitted so
+  // the consuming StreamBuilder's snapshot.hasError path can render them.
+  return stream.transform(
+    StreamTransformer<List<CareRecipientsRecord>,
+        List<CareRecipientsRecord>>.fromHandlers(
+      handleData: (data, sink) => sink.add(data),
+      handleError: (error, stack, sink) {
+        if (error is FirebaseException) {
+          print('[careRecipientsForActiveGroup] Firestore error '
+              'code=${error.code} message=${error.message}');
+        } else {
+          print('[careRecipientsForActiveGroup] error: $error');
+        }
+        sink.addError(error, stack);
+      },
+    ),
   );
 }
 

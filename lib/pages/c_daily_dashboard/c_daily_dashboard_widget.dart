@@ -178,6 +178,17 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                 stream: careRecipientsForActiveGroup(),
                                 builder: (context, snapshot) {
                                   // Customize what your widget looks like when it's loading.
+                                  if (snapshot.hasError) {
+                                    return Padding(
+                                      padding: EdgeInsets.all(12.0),
+                                      child: Text(
+                                        'Error loading care recipients: '
+                                        '${snapshot.error}',
+                                        style: FlutterFlowTheme.of(context)
+                                            .bodyMedium,
+                                      ),
+                                    );
+                                  }
                                   if (!snapshot.hasData) {
                                     return Center(
                                       child: SizedBox(
