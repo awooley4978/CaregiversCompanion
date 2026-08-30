@@ -898,9 +898,9 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(
                                       content: Text(
-                                          'Could not save the Care Profile. '
-                                          'Please check your connection and '
-                                          'try again.'),
+                                          'Could not save: '
+                                          '${e is FirebaseException ? e.code : e.runtimeType} — '
+                                          '${e.toString().length > 80 ? e.toString().substring(0, 80) : e.toString()}'),
                                     ),
                                   );
                                 }
