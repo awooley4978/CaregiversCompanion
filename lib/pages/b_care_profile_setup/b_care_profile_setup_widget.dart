@@ -9,6 +9,7 @@ import '/flutter_flow/flutter_flow_icon_button.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/flutter_flow_widgets.dart';
+import '/index.dart';
 import 'dart:ui';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -875,6 +876,15 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
                                             'Care Profile saved successfully.'),
                                       ),
                                     );
+                                    // Navigate to the newly created
+                                    // recipient's Daily Dashboard (same
+                                    // destination/pattern as the nav menu's
+                                    // "Daily Care" and the Client Directory
+                                    // card tap). selectedCareRecipient was set
+                                    // above so the dashboard opens for the new
+                                    // recipient, not a stale one.
+                                    context.pushNamed(
+                                        CDailyDashboardWidget.routeName);
                                   }
                                 } on OrgAccessDeniedException catch (e) {
                                   ScaffoldMessenger.of(context).showSnackBar(
