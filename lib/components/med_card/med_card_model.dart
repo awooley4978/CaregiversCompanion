@@ -19,7 +19,7 @@ class MedCardModel extends FlutterFlowModel<MedCardWidget> {
 
   @override
   void initState(BuildContext context) {
-    taken = widget.taken ?? true;
+    taken = widget!.taken;
   }
 
   @override
