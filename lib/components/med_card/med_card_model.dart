@@ -9,8 +9,18 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 class MedCardModel extends FlutterFlowModel<MedCardWidget> {
+  /// Live "taken" state for this card, initialized from the widget's `taken`
+  /// param and flipped by the trailing check-circle control. The parent
+  /// persists it back to the `medications` collection via `onTakenChanged`.
+  ///
+  /// This replaces the old read-only `taken` constructor value, which could
+  /// never change after construction (audit-part3 §1a — the dead "Taken" stub).
+  late bool taken;
+
   @override
-  void initState(BuildContext context) {}
+  void initState(BuildContext context) {
+    taken = widget!.taken;
+  }
 
   @override
   void dispose() {}
