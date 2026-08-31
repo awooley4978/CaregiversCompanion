@@ -126,27 +126,27 @@ describe('OWNER of recipient org (family) — previously-failing + unchanged', (
 // careRecipients LIST QUERY — collection query `where('orgId' == activeGroup)`
 // vs single-doc GET. Regression pin for the app's exact read path
 // (careRecipientsForActiveGroup -> queryCareRecipientsRecord with
-// q.where('orgId', isEqualTo: activeGroupId)). The READ rule
-// (canAccessRecipientRef -> recipientOrgId) derives the recipient's orgId via
-// a get() on the candidate doc, which Firestore cannot prove holds for every
-// candidate row of a collection query, so the query is expected to be DENIED
-// even though the same doc's single GET is ALLOWED. This pins that behavior.
+// q.where('orgId', isEqualTo: activeGroupId)). The READ rule is SPLIT: single-doc
+// GET uses the full canAccessRecipientRef gate, while LIST uses the exists()-only
+// canListRecipientsInOrg check (get() throws "Null value error" during query
+// evaluation), so the collection LIST query is ALLOWED for an in-org owner, and
+// the same doc's single GET is also ALLOWED.
 // ---------------------------------------------------------------------------
 describe('OWNER — careRecipients LIST QUERY (collection where orgId) vs single-doc GET', () => {
   it('A. single-doc GET of own-org recipient ALLOWED', async () => {
     await assertSucceeds(dbFor(OWNER).doc('careRecipients/'+REC_F1).get());
   });
-  it('B. collection query careRecipients where orgId==activeGroup is DENIED', async () => {
+  it('B. collection query careRecipients where orgId==activeGroup is ALLOWED', async () => {
     const q = dbFor(OWNER)
       .collection('careRecipients')
       .where('orgId', '==', ORG_FAM);
-    await assertFails(q.get());
+    await assertSucceeds(q.get());
   });
 });
 
 // ---------------------------------------------------------------- GRANTEE (share)
 describe('GRANTEE (recipientShares share to org_fam recipient)', () => {
-  it('recipient data accessible via active share', async () => {
+  it('recipient data accessible via active share (single-doc GETs)', async () => {
     await assertSucceeds(dbFor(GRANTEE).doc('careRecipients/'+REC_F1).get());
     await assertSucceeds(dbFor(GRANTEE).doc('careNotes/note1').get());
     await assertSucceeds(dbFor(GRANTEE).doc('mealEntries/meal1').get());
@@ -170,6 +170,15 @@ describe('STRANGER (member of a different family org)', () => {
   it('denied on another org org doc / member doc', async () => {
     await assertFails(dbFor(STRANGER).doc('organizations/'+ORG_FAM).get());
     await assertFails(dbFor(STRANGER).doc(`organizations/${ORG_FAM}/members/${OWNER}`).get());
+  });
+  it('collection LIST query on a foreign org remains DENIED (query-compatible path not loosened)', async () => {
+    // Stranger queries org_fam's recipients via the same where('orgId') shape
+    // the fix targets; canListRecipientsInOrg must deny (not a member of
+    // org_fam, no share) even though the query is now provable from resource.data.
+    const q = dbFor(STRANGER)
+      .collection('careRecipients')
+      .where('orgId', '==', ORG_FAM);
+    await assertFails(q.get());
   });
   it('self-read of users doc still SUCCEEDS', async () => {
     await assertSucceeds(dbFor(STRANGER).doc('users/'+STRANGER).get());
