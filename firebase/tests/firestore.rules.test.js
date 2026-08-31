@@ -202,6 +202,25 @@ describe('MEDICATIONS (ref-linked via careRecipientRef — newly enabled)', () =
   it('grantee (caregiver-level share) can read medications for the shared recipient', async () => {
     await assertSucceeds(dbFor(GRANTEE).doc('medications/med1').get());
   });
+  // The medication tracker pages the schedule with a LIVE LIST query
+  // (`queryMedicationsRecord` with `where careRecipientRef == selected`), NOT a
+  // single-doc GET. A get()-based `read` rule breaks this once ≥1 matching doc
+  // exists (Firestore does not load documents during query evaluation;
+  // get() throws "Null value error"), so a saved medication never appears in
+  // the tracker despite the "Medication added." success. This pins the
+  // LIST-compatible read path (mirrors the careRecipients get/list split).
+  it('owner can LIST medications where careRecipientRef == their recipient (tracker stream)', async () => {
+    const q = dbFor(OWNER)
+      .collection('medications')
+      .where('careRecipientRef', '==', F1ref);
+    await assertSucceeds(q.get());
+  });
+  it('stranger (other-org member) LIST of medications is DENIED', async () => {
+    const q = dbFor(STRANGER)
+      .collection('medications')
+      .where('careRecipientRef', '==', F1ref);
+    await assertFails(q.get());
+  });
 });
 
 // ---------------------------------------------------------------------------

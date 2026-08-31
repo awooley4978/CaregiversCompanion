@@ -32,7 +32,7 @@ class TextField2Widget extends StatefulWidget {
         this.leadingIconPresent = leadingIconPresent ?? false,
         this.trailingIconPresent = trailingIconPresent ?? false,
         this.hint = hint ?? 'e.g. Scrambled Eggs',
-        this.value = value ?? 'SlotValue(\$meal_name)',
+        this.value = value ?? '',
         this.onChange = onChange ?? '',
         this.onSubmit = onSubmit ?? '',
         this.variant = variant ?? 'outlined',
@@ -66,16 +66,31 @@ class _TextField2WidgetState extends State<TextField2Widget> {
     _model.onUpdate();
   }
 
+  /// The initial controller text for a blank (or sentinel-seeded) field.
+  ///
+  /// The FlutterFlow template exported the literal slot placeholder
+  /// `SlotValue($meal_name)` as the text-field `value` default, and the
+  /// `valueOrDefault` fallback re-seeds it whenever an empty value is passed —
+  /// so a genuinely-blank field was DISPLAYING that placeholder in the form
+  /// (owner bug: "Add Medication form pre-fills Medication Name/Dose/Directions
+  /// with SlotValue($meal_name)"). The placeholder is never a real value, so
+  /// treat it as empty: render blank + normal hint text, and never let it leak
+  /// into the saved record.
+  String _initialText(String? value) {
+    final resolved = valueOrDefault<String>(value ?? '', '');
+    if (resolved == 'SlotValue(\$meal_name)') {
+      return '';
+    }
+    return resolved;
+  }
+
   @override
   void initState() {
     super.initState();
     _model = createModel(context, () => TextField2Model());
 
     _model.inputTextController ??= TextEditingController(
-        text: valueOrDefault<String>(
-      widget!.value,
-      'SlotValue(\$meal_name)',
-    ));
+        text: _initialText(widget!.value));
     _model.inputFocusNode ??= FocusNode();
 
     WidgetsBinding.instance.addPostFrameCallback((_) => safeSetState(() {}));

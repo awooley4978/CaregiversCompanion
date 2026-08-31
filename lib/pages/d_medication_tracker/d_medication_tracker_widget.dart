@@ -46,6 +46,22 @@ bool isTakenForDay(DateTime? takenAt, DateTime now) {
   return t.year == n.year && t.month == n.month && t.day == n.day;
 }
 
+/// Groups a medication record into the Morning schedule section.
+///
+/// Legacy/demo meds carry a real clock time (`scheduledTime`): AM < 12 -> Morn.
+/// V1 records captured by the Add Medication form store NO clock time
+/// (scheduledTime unset) — there the Morning/Afternoon dropdown value IS the
+/// schedule value, so group by `timeOfDay` (defaulting to Morning when neither
+/// is present). A freshly-saved med therefore lands in the correct section and
+/// is never silently dropped.
+bool isMedicationMorning(MedicationsRecord med) {
+  final t = med.scheduledTime;
+  if (t != null) {
+    return t.hour < 12;
+  }
+  return med.timeOfDay != 'Afternoon';
+}
+
 class DMedicationTrackerWidget extends StatefulWidget {
   const DMedicationTrackerWidget({super.key});
 
@@ -343,16 +359,7 @@ class _DMedicationTrackerWidgetState extends State<DMedicationTrackerWidget> {
     );
   }
 
-  bool _isMorning(MedicationsRecord med) {
-    final t = med.scheduledTime;
-    if (t != null) {
-      return t.hour < 12; // legacy/demo meds carry a real clock time
-    }
-    // V1 records capture no clock time (scheduledTime unset) — the
-    // Morning/Afternoon dropdown value IS the schedule value, so group by it
-    // (default to Morning when neither is present).
-    return med.timeOfDay != 'Afternoon';
-  }
+  bool _isMorning(MedicationsRecord med) => isMedicationMorning(med);
 
   @override
   Widget build(BuildContext context) {

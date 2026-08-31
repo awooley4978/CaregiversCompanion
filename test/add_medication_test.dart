@@ -122,4 +122,44 @@ void main() {
     expect(soleMedicationDoc(), isNull);
     expect(find.text('Enter a medication name.'), findsOneWidget);
   });
+
+  testWidgets('blank fields render BLANK — the SlotValue sentinel is never '
+      'displayed as field text (owner bug 1)', (tester) async {
+    FFAppState().selectedCareRecipient =
+        FirebaseFirestore.instance.doc('carerecipients/r1');
+    await pumpForm(tester);
+
+    // The FlutterFlow template seeded empty fields with the literal
+    // `SlotValue($meal_name)` placeholder; it must never show in the form.
+    expect(find.textContaining('SlotValue'), findsNothing);
+    // All three text fields start empty (only label + hint, no placeholder
+    // text in the controller), so the form reads as a normal blank form.
+    final fields = tester.widgetList<TextField>(find.byType(TextField)).toList();
+    expect(fields, hasLength(3));
+    for (final field in fields) {
+      expect(field.controller?.text ?? '', isEmpty,
+          reason: 'a blank form field must render blank, not a sentinel');
+    }
+  });
+
+  testWidgets('a saved medication NEVER persists the SlotValue sentinel as a '
+      'name (owner bug 1)', (tester) async {
+    FFAppState().selectedCareRecipient =
+        FirebaseFirestore.instance.doc('carerecipients/r1');
+    await pumpForm(tester);
+
+    await tester.enterText(find.byType(TextField).at(0), 'Atorvastatin');
+    await tapSave(tester);
+
+    final data = soleMedicationDoc();
+    expect(data, isNotNull);
+    expect(data!['medicationName'], 'Atorvastatin');
+    expect('${data['medicationName']}'.contains('SlotValue'), isFalse);
+    expect('${data['medicationName']}'.contains('\$meal_name'), isFalse);
+    // Blank dose/directions are stored as null/absent — never the sentinel.
+    expect(data.containsKey('dose'), isFalse);
+    expect(data['dose'], isNull);
+    expect(data.containsKey('directions'), isFalse);
+    expect(data['directions'], isNull);
+  });
 }
