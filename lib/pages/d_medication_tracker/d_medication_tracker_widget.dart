@@ -16,6 +16,35 @@ import 'package:provider/provider.dart';
 import 'd_medication_tracker_model.dart';
 export 'd_medication_tracker_model.dart';
 
+/// Builds the Firestore update payload for a Taken/un-taken toggle on a med.
+///
+/// Only marking a dose Taken stamps `takenAt` with a server timestamp (the day
+/// the dose was actually taken). Untoggling back to Pending clears the field
+/// with `FieldValue.delete()` so no stale or new timestamp lingers — the record
+/// then reads `takenAt` as null (owner req: "clear/null rather than writing a
+/// new timestamp").
+Map<String, dynamic> medicationTakenUpdate({required bool taken}) => {
+      'taken': taken,
+      'status': taken ? 'TAKEN' : 'PENDING',
+      'takenAt': taken ? FieldValue.serverTimestamp() : FieldValue.delete(),
+    };
+
+/// Effective "taken for today" state for a med: a dose counts as Taken only
+/// when its `takenAt` timestamp falls on the current local calendar date.
+///
+/// A persisted `taken:true` from a previous day (or a missing timestamp)
+/// renders as Pending for the new day and does not count toward today's
+/// adherence ring — the stored `taken` boolean is left untouched (render-time,
+/// day-rollover interpretation, not a persisted reset).
+bool isTakenForDay(DateTime? takenAt, DateTime now) {
+  if (takenAt == null) {
+    return false;
+  }
+  final t = takenAt.toLocal();
+  final n = now.toLocal();
+  return t.year == n.year && t.month == n.month && t.day == n.day;
+}
+
 class DMedicationTrackerWidget extends StatefulWidget {
   const DMedicationTrackerWidget({super.key});
 
@@ -59,11 +88,7 @@ class _DMedicationTrackerWidgetState extends State<DMedicationTrackerWidget> {
     bool taken,
   ) async {
     try {
-      await med.reference.update({
-        'taken': taken,
-        'status': taken ? 'TAKEN' : 'PENDING',
-        'takenAt': FieldValue.serverTimestamp(),
-      });
+      await med.reference.update(medicationTakenUpdate(taken: taken));
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -80,7 +105,10 @@ class _DMedicationTrackerWidgetState extends State<DMedicationTrackerWidget> {
   /// are driven by whether the dose has been taken (green "taken" vs the
   /// neutral "pending" look the demo already used for un-taken doses).
   Widget _buildMedCard(BuildContext context, MedicationsRecord med) {
-    final taken = med.taken;
+    // Effective per-day taken state: a stale `taken:true` from a previous day
+    // (or a missing `takenAt`) renders as Pending for the new day instead of
+    // trusting the persisted boolean alone.
+    final taken = isTakenForDay(med.takenAt, DateTime.now());
     final timeLabel = med.scheduledTime != null
         ? dateTimeFormat('hh:mm a', med.scheduledTime)
         : (med.timeOfDay.isNotEmpty ? med.timeOfDay : '');
@@ -541,7 +569,10 @@ class _DMedicationTrackerWidgetState extends State<DMedicationTrackerWidget> {
                     final morning = meds.where(_isMorning).toList();
                     final afternoon =
                         meds.where((m) => !_isMorning(m)).toList();
-                    final takenCount = meds.where((m) => m.taken).length;
+                    final takenCount = meds
+                        .where((m) =>
+                            isTakenForDay(m.takenAt, DateTime.now()))
+                        .length;
                     final total = meds.length;
                     // takenCount can never exceed total, so percent is in [0,1].
                     final percent = total == 0 ? 0.0 : takenCount / total;

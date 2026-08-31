@@ -246,6 +246,20 @@ dynamic _resolveSentinel(dynamic value) {
   return value;
 }
 
+/// True when [value] resolves to a `FieldValue.delete()` sentinel (used by
+/// `update()` to remove the field). Mirrors `_resolveSentinel`'s delegate
+/// lookup: the app-facing `FieldValue` is a `FieldValuePlatform`; the purified
+/// delegate carries a `FieldValueType.delete` type.
+bool _isDeleteSentinel(dynamic value) {
+  if (value is FieldValuePlatform) {
+    value = FieldValuePlatform.getDelegate(value);
+  }
+  if (value != null && value.runtimeType.toString().contains('FieldValue')) {
+    return (value as dynamic).type?.toString() == 'FieldValueType.delete';
+  }
+  return false;
+}
+
 Map<String, dynamic> _resolveSentinels(Map<String, dynamic> data) =>
     data.map((key, value) => MapEntry(key, _resolveSentinel(value)));
 
@@ -280,6 +294,24 @@ class _MemoryDocumentReference extends DocumentReferencePlatform {
   @override
   Future<void> set(Map<String, dynamic> data, [SetOptions? options]) async {
     _store.writeDoc(path, data, options: options);
+  }
+
+  @override
+  Future<void> update(Map<FieldPath, dynamic> data) async {
+    final existing =
+        Map<String, dynamic>.from(_store.docs[path] ?? const {});
+    data.forEach((fieldPath, value) {
+      // The app-facing update() encodes string keys to FieldPath; a delete
+      // sentinel removes the field, everything else is merged in (with
+      // serverTimestamp resolving to a real DateTime like real Firestore).
+      final key = fieldPath.components.first;
+      if (_isDeleteSentinel(value)) {
+        existing.remove(key);
+      } else {
+        existing[key] = _resolveSentinel(value);
+      }
+    });
+    _store.docs[path] = existing;
   }
 
   @override
