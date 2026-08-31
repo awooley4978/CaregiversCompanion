@@ -74,6 +74,9 @@ async function seed(ctx) {
   await set('careNotes/note_prof', { careRecipientRef: PROFref,  text: 'y' });
   await set('mealEntries/meal1',   { patientRef: F1ref });
   await set('symptomEntries/sym1', { patientRef: F1ref });
+  // medications — ref-linked via careRecipientRef (enabled for the tracker)
+  await set('medications/med1',    { careRecipientRef: F1ref,    medicationName: 'Lisinopril', taken: true });
+  await set('medications/med_other',{ careRecipientRef: OTHERref, medicationName: 'X', taken: false });
 }
 
 before(async () => {
@@ -154,6 +157,47 @@ describe('GRANTEE (recipientShares share to org_fam recipient)', () => {
   });
   it('grantee CANNOT read the recipientShares management doc (owner-org only)', async () => {
     await assertFails(dbFor(GRANTEE).doc(`recipientShares/${REC_F1}/grants/${ORG_GRNT}`).get());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MEDICATIONS — newly enabled from the dead-collection deny. ref-linked via
+// careRecipientRef, gated by the same recipient-org / share / assignment rule
+// as careNotes. Owner/active member of the recipient's org may read + write;
+// a stranger (member of another org) and cross-org docs are denied.
+// ---------------------------------------------------------------------------
+describe('MEDICATIONS (ref-linked via careRecipientRef — newly enabled)', () => {
+  it('owner of recipient org can read a medications doc', async () => {
+    await assertSucceeds(dbFor(OWNER).doc('medications/med1').get());
+  });
+  it('owner can UPDATE a medications doc (the "Taken" toggle write)', async () => {
+    await assertSucceeds(dbFor(OWNER).doc('medications/med1').update({
+      taken: true, status: 'TAKEN', takenAt: new Date(),
+    }));
+  });
+  it('owner can CREATE a medications doc referencing their recipient', async () => {
+    await assertSucceeds(dbFor(OWNER).doc('medications/med_new').set({
+      careRecipientRef: F1ref, medicationName: 'Metformin', taken: false,
+    }));
+  });
+  it('owner read of a DIFFERENT-org medications doc is DENIED', async () => {
+    await assertFails(dbFor(OWNER).doc('medications/med_other').get());
+  });
+  it('stranger (other-org member) read of a medications doc is DENIED', async () => {
+    await assertFails(dbFor(STRANGER).doc('medications/med1').get());
+  });
+  it('stranger update of a medications doc is DENIED', async () => {
+    await assertFails(dbFor(STRANGER).doc('medications/med1').update({
+      taken: true, status: 'TAKEN',
+    }));
+  });
+  it('stranger create of a medications doc referencing owner recipient is DENIED', async () => {
+    await assertFails(dbFor(STRANGER).doc('medications/med_mal').set({
+      careRecipientRef: F1ref, medicationName: 'X',
+    }));
+  });
+  it('grantee (caregiver-level share) can read medications for the shared recipient', async () => {
+    await assertSucceeds(dbFor(GRANTEE).doc('medications/med1').get());
   });
 });
 

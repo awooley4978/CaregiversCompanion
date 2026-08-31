@@ -398,6 +398,22 @@ service cloud.firestore {
     }
 
     // ---------------------------------------------------------------------------
+    // medications — ref-linked via careRecipientRef (see careNotes note above)
+    // Enabled 2026-08-31: was a dead collection with an explicit deny; the
+    // medication tracker's "Taken" toggle now reads + updates it. It carries a
+    // careRecipientRef DocumentReference, so it uses the same recipient-org /
+    // share / assignment gate as careNotes — a one-block swap as the dead
+    // collections comment describes. Enabling it does not loosen any other
+    // collection.
+    // ---------------------------------------------------------------------------
+    match /medications/{docId} {
+      allow read:   if canAccessRecipientRef(get(resource.data.careRecipientRef).id);
+      allow create: if canWriteRecipientData(get(request.resource.data.careRecipientRef).id);
+      allow update, delete:
+        if canWriteRecipientData(get(resource.data.careRecipientRef).id);
+    }
+
+    // ---------------------------------------------------------------------------
     // Dead collections (Q10/Q13 — explicit deny until their domains are wired).
     // Zero live data today, zero UI readers/writers; owner-only would silently
     // allow future un-audited writes through old code paths. When a domain gets
@@ -405,7 +421,6 @@ service cloud.firestore {
     // collections — a one-block swap. The emerencyinfo typo is RETAINED (§5.4).
     // ---------------------------------------------------------------------------
     match /emerencyinfo/{docId}  { allow read, write: if false; }
-    match /medications/{docId}   { allow read, write: if false; }
     match /vitalLogs/{docId}     { allow read, write: if false; }
     match /appointments/{docId}  { allow read, write: if false; }
     match /dashboardNotes/{docId}{ allow read, write: if false; }

@@ -22,6 +22,7 @@ class MedCardWidget extends StatefulWidget {
     String? statusText,
     String? time,
     bool? taken,
+    this.onTakenChanged,
   })  : this.bgTint = bgTint ?? const Color(0xFFE8F5E9),
         this.dosage = dosage ?? '10mg - 1 tablet',
         this.iconColor = iconColor ?? const Color(0x00000000),
@@ -42,6 +43,13 @@ class MedCardWidget extends StatefulWidget {
   final String statusText;
   final String time;
   final bool taken;
+
+  /// Called when the trailing "Taken" check-circle is tapped, with the new
+  /// toggled value. When provided the card is interactive: its check icon and
+  /// status chip are driven by the live toggle state and the new value is
+  /// reported here so the parent can persist it to `medications`. When null
+  /// the card stays purely presentational (previous static behavior).
+  final void Function(bool taken)? onTakenChanged;
 
   @override
   State<MedCardWidget> createState() => _MedCardWidgetState();
@@ -64,6 +72,17 @@ class _MedCardWidgetState extends State<MedCardWidget> {
     WidgetsBinding.instance.addPostFrameCallback((_) => safeSetState(() {}));
   }
 
+  /// Re-sync local taken state when the parent rebuilds with a new value
+  /// (e.g. the `medications` stream delivers an update from this device, a
+  /// teammate, or after Firestore's local cache round-trips our own write).
+  @override
+  void didUpdateWidget(covariant MedCardWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.taken != widget.taken) {
+      _model.taken = widget.taken;
+    }
+  }
+
   @override
   void dispose() {
     _model.maybeDispose();
@@ -73,6 +92,25 @@ class _MedCardWidgetState extends State<MedCardWidget> {
 
   @override
   Widget build(BuildContext context) {
+    // Live toggle state. When the card is interactive (an onTakenChanged
+    // callback is wired), the check icon and status chip reflect the current
+    // taken state so tapping gives immediate visual feedback; when no callback
+    // is provided the card keeps its previous static-presentation behavior.
+    final interactive = widget.onTakenChanged != null;
+    final isTaken = _model.taken;
+    final statusText = interactive
+        ? (isTaken ? 'TAKEN' : 'PENDING')
+        : widget.statusText;
+    final statusBgColor = interactive
+        ? (isTaken
+            ? const Color(0xFFE8F5E9)
+            : FlutterFlowTheme.of(context).primaryBackground)
+        : widget.statusBg;
+    final statusFgColor = interactive
+        ? (isTaken
+            ? const Color(0xFF2E7D32)
+            : FlutterFlowTheme.of(context).secondaryText)
+        : widget.statusColor;
     return Padding(
       padding: EdgeInsetsDirectional.fromSTEB(0.0, 0.0, 0.0, 16.0),
       child: Container(
@@ -211,10 +249,7 @@ class _MedCardWidgetState extends State<MedCardWidget> {
                     children: [
                       Container(
                         decoration: BoxDecoration(
-                          color: valueOrDefault<Color>(
-                            widget!.statusBg,
-                            Color(0xFFE8F5E9),
-                          ),
+                          color: statusBgColor,
                           borderRadius: BorderRadius.circular(9999.0),
                           shape: BoxShape.rectangle,
                         ),
@@ -223,10 +258,7 @@ class _MedCardWidgetState extends State<MedCardWidget> {
                               12.0, 6.0, 12.0, 6.0),
                           child: Container(
                             child: Text(
-                              valueOrDefault<String>(
-                                widget!.statusText,
-                                'TAKEN',
-                              ),
+                              statusText,
                               style: FlutterFlowTheme.of(context)
                                   .labelSmall
                                   .override(
@@ -236,10 +268,7 @@ class _MedCardWidgetState extends State<MedCardWidget> {
                                           .labelSmall
                                           .fontStyle,
                                     ),
-                                    color: valueOrDefault<Color>(
-                                      widget!.statusColor,
-                                      Color(0xFF2E7D32),
-                                    ),
+                                    color: statusFgColor,
                                     letterSpacing: 0.0,
                                     fontWeight: FontWeight.w600,
                                     fontStyle: FlutterFlowTheme.of(context)
@@ -257,19 +286,18 @@ class _MedCardWidgetState extends State<MedCardWidget> {
                         fillColor: Colors.transparent,
                         icon: Icon(
                           Icons.check_circle_rounded,
-                          color: valueOrDefault<Color>(
-                            valueOrDefault<bool>(
-                              widget!.taken,
-                              true,
-                            )
-                                ? FlutterFlowTheme.of(context).success
-                                : FlutterFlowTheme.of(context).alternate,
-                            FlutterFlowTheme.of(context).success,
-                          ),
+                          color: isTaken
+                              ? FlutterFlowTheme.of(context).success
+                              : FlutterFlowTheme.of(context).alternate,
                           size: 32.0,
                         ),
                         onPressed: () {
-                          print('IconButton pressed ...');
+                          if (widget.onTakenChanged != null) {
+                            final next = !_model.taken;
+                            _model.taken = next;
+                            setState(() {});
+                            widget.onTakenChanged!.call(next);
+                          }
                         },
                       ),
                     ].divide(SizedBox(height: 8.0)),
