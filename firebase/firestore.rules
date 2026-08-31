@@ -103,7 +103,7 @@ service cloud.firestore {
     }
 
     function isOrgKind(orgId, kind) {
-      return orgId is string && get(orgDoc(orgId)).data.kind == kind;
+      return orgId is string && exists(orgDoc(orgId)) && get(orgDoc(orgId)).data.kind == kind;
     }
 
     // Share doc: recipientShares/{recipientId}/grants/{granteeOrgId} (§3.3)
@@ -130,7 +130,8 @@ service cloud.firestore {
     }
 
     function hasActiveAssignment(recipientId) {
-      return get(assignmentDoc(recipientId)).data.status == 'active'
+      return exists(assignmentDoc(recipientId))
+        && get(assignmentDoc(recipientId)).data.status == 'active'
         && (!('validFrom' in get(assignmentDoc(recipientId)).data)
             || request.time >= get(assignmentDoc(recipientId)).data.validFrom)
         && (!('validUntil' in get(assignmentDoc(recipientId)).data)
@@ -154,6 +155,23 @@ service cloud.firestore {
       return signedIn() && recipientId is string
         && ( canAccessRecipientInOrg(recipientId)
           || hasActiveShare(recipientId, activeGroupId()) );
+    }
+
+    // Query-compatible LIST check (2026-08-30): Firestore evaluates LIST query
+    // rules WITHOUT loading documents — get() returns null even for existing
+    // docs (dereferencing throws "Null value error"), while exists() on a
+    // fully-specified path works. So a LIST rule cannot read the member doc's
+    // role or the org doc's kind; it can only assert active membership via
+    // exists() on organizations/{orgId}/members/{request.auth.uid}.
+    //
+    // Consequence (v1): the careRecipients LIST rule lets any ACTIVE MEMBER of
+    // the recipient's org list recipients — correct for family (D6: any active
+    // member). Professional caregiver/viewer assignment-scoped LISTING is
+    // deferred (needs a collectionGroup query on assignments — future work).
+    // Single-doc GETs keep the FULL kind-branched + share + assignment gate via
+    // canAccessRecipientRef (get() is fine for single-doc reads).
+    function canListRecipientsInOrg(orgId) {
+      return signedIn() && orgId is string && exists(memberDoc(orgId));
     }
 
     // Write access to recipient data: family -> member role >= caregiver;
@@ -311,8 +329,14 @@ service cloud.firestore {
       // doc; activeGroupId is never a standalone allow). orgId required.
       allow create: if isActiveMember(request.resource.data.orgId)
         && request.resource.data.orgId is string;
-      // Read: within-org (kind-branched, D6) or grantee via an active share.
-      allow read: if canAccessRecipientRef(docId);
+      // Read split (2026-08-30): single-doc GET keeps the FULL gate (kind-branched
+      // within-org + grantee share + caregiver/viewer assignment), all of which
+      // use get() — fine for single-doc reads. LIST queries (careRecipients where
+      // orgId == activeGroup) use an exists()-only check, because Firestore does
+      // not load documents during query evaluation (get() throws "Null value
+      // error" there).
+      allow get: if canAccessRecipientRef(docId);
+      allow list: if canListRecipientsInOrg(resource.data.orgId);
       // Owner-org caregiver+ (kind-branched) or caregiver-level grantee;
       // orgId is immutable under rules (§4.3) — no transfer in v1 (grants are
       // the v1 mechanism for provider access).
