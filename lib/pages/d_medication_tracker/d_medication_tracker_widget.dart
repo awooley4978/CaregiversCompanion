@@ -1,4 +1,5 @@
 import '/backend/backend.dart';
+import '/components/add_medication/add_medication_widget.dart';
 import '/components/button/button_widget.dart';
 import '/components/med_card/med_card_widget.dart';
 import '/components/nav_menu_directory/nav_menu_directory_widget.dart';
@@ -98,6 +99,31 @@ class _DMedicationTrackerWidgetState extends State<DMedicationTrackerWidget> {
         );
       }
     }
+  }
+
+  /// Opens the Add Medication create form as a bottom sheet (the repo's
+  /// AddMealWidget modal pattern). The form writes a `medications` doc scoped
+  /// to the selected care recipient; the tracker's live stream (the same
+  /// scoped query below) picks the new record up with no extra wiring.
+  Future<void> _openAddMedication(BuildContext context) async {
+    await showModalBottomSheet(
+      isScrollControlled: true,
+      backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
+      enableDrag: false,
+      context: context,
+      builder: (context) {
+        return GestureDetector(
+          onTap: () {
+            FocusScope.of(context).unfocus();
+            FocusManager.instance.primaryFocus?.unfocus();
+          },
+          child: Padding(
+            padding: MediaQuery.viewInsetsOf(context),
+            child: AddMedicationWidget(),
+          ),
+        );
+      },
+    ).then((value) => safeSetState(() {}));
   }
 
   /// Builds one live medication card from a `medications` record, keeping the
@@ -767,6 +793,9 @@ class _DMedicationTrackerWidgetState extends State<DMedicationTrackerWidget> {
                                   fullWidth: true,
                                   loading: false,
                                   disabled: false,
+                                  onPressed: () async {
+                                    await _openAddMedication(context);
+                                  },
                                 ),
                               ),
                             ),
