@@ -66,6 +66,22 @@ class _AddMedicationWidgetState extends State<AddMedicationWidget> {
     super.dispose();
   }
 
+  /// Reads a TextField2Widget controller as entered text, treating the
+  /// FlutterFlow slot placeholder that the template seeds an empty field with
+  /// (`SlotValue($meal_name)`) as empty. TextField2Widget's controller is
+  /// initialized with `valueOrDefault(widget.value, 'SlotValue($meal_name)')`,
+  /// and valueOrDefault falls back to that sentinel whenever the passed `value`
+  /// is empty — so a genuinely-blank field yields the literal placeholder, not
+  /// ''. Treating it as empty keeps a blank form from ever persisting the
+  /// placeholder as a medication name/dose/directions.
+  String _enteredText(TextEditingController? controller) {
+    final text = (controller?.text ?? '').trim();
+    if (text == 'SlotValue(\$meal_name)') {
+      return '';
+    }
+    return text;
+  }
+
   /// Saves the new medication to the `medications` collection for the selected
   /// care recipient. Mirrors AddMealWidget's save: gate on a valid selection
   /// (the Phase-4 create rule requires careRecipientRef to be a real, writable
@@ -85,8 +101,7 @@ class _AddMedicationWidgetState extends State<AddMedicationWidget> {
       return;
     }
 
-    final name =
-        (_model.textFieldModel1.inputTextController?.text ?? '').trim();
+    final name = _enteredText(_model.textFieldModel1.inputTextController);
     if (name.isEmpty) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -97,10 +112,9 @@ class _AddMedicationWidgetState extends State<AddMedicationWidget> {
       }
       return;
     }
-    final dose =
-        (_model.textFieldModel2.inputTextController?.text ?? '').trim();
+    final dose = _enteredText(_model.textFieldModel2.inputTextController);
     final directions =
-        (_model.textFieldModel3.inputTextController?.text ?? '').trim();
+        _enteredText(_model.textFieldModel3.inputTextController);
     final timeOfDay = _model.dropdownValue ?? 'Morning';
     final now = DateTime.now();
     // Representative clock time for the chosen section so the tracker's
