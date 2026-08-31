@@ -370,6 +370,11 @@ class _AClientDirectoryWidgetState extends State<AClientDirectoryWidget> {
                                             listViewCareRecipientsRecord
                                                 .reference;
                                         safeSetState(() {});
+                                        // Open the selected recipient's Daily
+                                        // Dashboard (same destination/pattern
+                                        // as the nav menu's "Daily Care").
+                                        context.pushNamed(
+                                            CDailyDashboardWidget.routeName);
                                       },
                                       child: ClientCardWidget(
                                         key: Key(
