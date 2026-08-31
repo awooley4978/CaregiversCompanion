@@ -15,6 +15,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:new_project/components/add_medication/add_medication_widget.dart';
 import 'package:new_project/flutter_flow/flutter_flow_util.dart';
+import 'package:provider/provider.dart';
 import 'firebase_test_setup.dart';
 
 void main() {
@@ -31,11 +32,16 @@ void main() {
   });
 
   Future<void> pumpForm(WidgetTester tester) async {
+    // The widget reads FFAppState via context.watch (mirroring AddMealWidget);
+    // the real app provides it in main(). Provide the singleton here too.
     await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: SingleChildScrollView(
-            child: AddMedicationWidget(),
+      ChangeNotifierProvider<FFAppState>.value(
+        value: FFAppState(),
+        child: MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: AddMedicationWidget(),
+            ),
           ),
         ),
       ),
