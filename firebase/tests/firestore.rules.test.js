@@ -26,6 +26,7 @@ const ORG_GRNT   = 'org_grantee';
 const ORG_PROF   = 'org_prof';
 
 const OWNER     = 'uid_owner';      // member org_fam, owner
+const CAREGIVER = 'uid_caregiver';  // member org_fam, caregiver (non-owner family member)
 const STRANGER  = 'uid_stranger';   // member org_other
 const GRANTEE   = 'uid_grantee';    // member org_grnt (receives share to org_fam recipient)
 const PROFCARE  = 'uid_profcare';   // caregiver org_prof (no assignment seedable; D9 empty)
@@ -43,6 +44,7 @@ async function seed(ctx) {
   const set = async (p, d) => db.doc(p).set(d);
   // users (activeGroupId context)
   await set('users/'+OWNER,    { activeGroupId: ORG_FAM });
+  await set('users/'+CAREGIVER,{ activeGroupId: ORG_FAM });
   await set('users/'+STRANGER, { activeGroupId: ORG_OTHER });
   await set('users/'+GRANTEE,  { activeGroupId: ORG_GRNT });
   await set('users/'+PROFCARE, { activeGroupId: ORG_PROF });
@@ -53,6 +55,7 @@ async function seed(ctx) {
   await set('organizations/'+ORG_GRNT,   { kind: 'family', createdBy: GRANTEE });
   await set('organizations/'+ORG_PROF,   { kind: 'organization', createdBy: PROFOWNER });
   await set(`organizations/${ORG_FAM}/members/${OWNER}`,   { uid: OWNER, role: 'owner', status: 'active' });
+  await set(`organizations/${ORG_FAM}/members/${CAREGIVER}`,{ uid: CAREGIVER, role: 'caregiver', status: 'active' });
   await set(`organizations/${ORG_OTHER}/members/${STRANGER}`,{ uid: STRANGER, role: 'owner', status: 'active' });
   await set(`organizations/${ORG_GRNT}/members/${GRANTEE}`, { uid: GRANTEE, role: 'owner', status: 'active' });
   await set(`organizations/${ORG_PROF}/members/${PROFCARE}`,{ uid: PROFCARE, role: 'caregiver', status: 'active' });
@@ -198,6 +201,93 @@ describe('MEDICATIONS (ref-linked via careRecipientRef — newly enabled)', () =
   });
   it('grantee (caregiver-level share) can read medications for the shared recipient', async () => {
     await assertSucceeds(dbFor(GRANTEE).doc('medications/med1').get());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FAMILY CAREGIVER (non-owner member of the recipient's family org) — the
+// task's required "caregiver within org" ALLOWED case. D6: family org -> any
+// active member with role owner/admin/caregiver/viewer may READ; writes need
+// role owner/admin/caregiver (canWriteInOrg family branch). No assignment is
+// required for FAMILY orgs. Cross-org data stays denied.
+// ---------------------------------------------------------------------------
+describe('FAMILY CAREGIVER within recipient org (non-owner)', () => {
+  it('can read the recipient + ref-linked records of their own family org', async () => {
+    const db = dbFor(CAREGIVER);
+    await assertSucceeds(db.doc('careRecipients/'+REC_F1).get());
+    await assertSucceeds(db.doc('careNotes/note1').get());
+    await assertSucceeds(db.doc('mealEntries/meal1').get());
+    await assertSucceeds(db.doc('symptomEntries/sym1').get());
+    await assertSucceeds(db.doc('medications/med1').get());
+    await assertSucceeds(db.doc(`careRecipients/${REC_F1}/carechecklist/item1`).get());
+  });
+  it('can write ref-linked data for their own family org (charting loop)', async () => {
+    const db = dbFor(CAREGIVER);
+    await assertSucceeds(db.doc('careNotes/cg_note').set({ careRecipientRef: F1ref, text: 'by caregiver' }));
+    await assertSucceeds(db.doc('mealEntries/cg_meal').set({ patientRef: F1ref }));
+    await assertSucceeds(db.doc('symptomEntries/cg_sym').set({ patientRef: F1ref }));
+    await assertSucceeds(db.doc('medications/cg_med').set({ careRecipientRef: F1ref, medicationName: 'Y', taken: false }));
+    await assertSucceeds(db.doc('medications/med1').update({ taken: true, status: 'TAKEN' }));
+    await assertSucceeds(db.doc(`careRecipients/${REC_F1}/carechecklist/cg_item`).set({ name: 'cg' }));
+  });
+  it('cross-org recipient data is DENIED for the family caregiver', async () => {
+    const db = dbFor(CAREGIVER);
+    await assertFails(db.doc('careRecipients/'+REC_OTHER).get());
+    await assertFails(db.doc('careNotes/note_other').get());
+    await assertFails(db.doc('medications/med_other').get());
+  });
+  it('careRecipients DELETE stays owner-only (caregiver denied)', async () => {
+    await assertFails(dbFor(CAREGIVER).doc('careRecipients/'+REC_F1).delete());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DEAD / PLACEHOLDER COLLECTIONS — deny pins. The V1 consolidated decision is
+// "stay denied": emerencyinfo, vitalLogs, appointments, dashboardNotes and
+// iconname have NO functional read/write path anywhere in lib/ (their pages are
+// static mockups / print-stubs), so they keep the Phase-4 `allow read, write:
+// if false` blocks. These pins make an accidental future enable FAIL CI even if
+// no UI work lands with it. Even the OWNER (who legitimately accesses every
+// functional collection) is denied here.
+// ---------------------------------------------------------------------------
+describe('DEAD COLLECTIONS stay denied (V1 consolidated decision)', () => {
+  const dead = ['emerencyinfo', 'vitalLogs', 'appointments', 'dashboardNotes', 'iconname'];
+  dead.forEach((col) => {
+    it(`${col}: read AND write DENIED for an active owner`, async () => {
+      const db = dbFor(OWNER);
+      await assertFails(db.doc(col+'/x_probe').get());
+      await assertFails(db.doc(col+'/x_probe').set({ anyField: true }));
+      await assertFails(db.doc(col+'/x_probe').delete());
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// REAL APP WRITE/DELETE PATHS (consolidated pin) — the app's live code paths
+// that previously had no dedicated create/delete assertion: mealEntries create
+// (Add Meal sheet), symptomEntries create (dashboard "Add Entry" copy),
+// carechecklist create (dashboard task card) and careNotes delete (note card /
+// care-notes page). Each is a real write the V1 ruleset must keep allowing for
+// the right actor and denying for the wrong one.
+// ---------------------------------------------------------------------------
+describe('Real app write/delete paths (owner) + stranger denial', () => {
+  it('mealEntries create (Add Meal sheet) ALLOWED for owner, DENIED for stranger', async () => {
+    await assertSucceeds(dbFor(OWNER).doc('mealEntries/meal_new').set({ patientRef: F1ref, mealName: 'Soup' }));
+    await assertFails(dbFor(STRANGER).doc('mealEntries/meal_mal').set({ patientRef: F1ref }));
+  });
+  it('symptomEntries create (dashboard "Add Entry") ALLOWED for owner, DENIED for stranger', async () => {
+    await assertSucceeds(dbFor(OWNER).doc('symptomEntries/sym_new').set({ patientRef: F1ref, symptom: 'Pain' }));
+    await assertFails(dbFor(STRANGER).doc('symptomEntries/sym_mal').set({ patientRef: F1ref }));
+  });
+  it('carechecklist create (dashboard task card) ALLOWED for owner, DENIED for stranger', async () => {
+    await assertSucceeds(dbFor(OWNER).doc(`careRecipients/${REC_F1}/carechecklist/item_new`).set({ name: 'task' }));
+    await assertFails(dbFor(STRANGER).doc(`careRecipients/${REC_F1}/carechecklist/item_mal`).set({ name: 'x' }));
+  });
+  it('careNotes delete (note card / care-notes page) ALLOWED for owner, DENIED for stranger', async () => {
+    const db = dbFor(OWNER);
+    await assertSucceeds(db.doc('careNotes/del_note').set({ careRecipientRef: F1ref, text: 'tmp' }));
+    await assertSucceeds(db.doc('careNotes/del_note').delete());
+    await assertFails(dbFor(STRANGER).doc('careNotes/note1').delete());
   });
 });
 
