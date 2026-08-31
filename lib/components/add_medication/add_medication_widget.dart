@@ -28,11 +28,15 @@ export 'add_medication_model.dart';
 ///   * medicationName  <- "Medication Name" input
 ///   * dose            <- "Dose" input
 ///   * directions      <- "Directions" input
-///   * timeOfDay       <- "Time of Day" dropdown (Morning/Afternoon)
-///   * scheduledTime   <- today at 08:00 (Morning) / 14:00 (Afternoon); drives
-///                        the tracker's Morning/Afternoon grouping and the
-///                        'hh:mm a' label on the med card (see
-///                        d_medication_tracker_widget.dart _isMorning + timeLabel).
+///   * timeOfDay       <- "Time of Day" dropdown (Morning/Afternoon); for V1 this
+///                        is the ACTUAL schedule value — the tracker's
+///                        Morning/Afternoon grouping and the med card's label
+///                        derive from it (see d_medication_tracker_widget.dart
+///                        _isMorning + timeLabel).
+///   * scheduledTime   <- left UNSET by this form. V1 captures no clock time,
+///                        so no representative 08:00/14:00 is synthesized; the
+///                        field is only written when a real user-entered time
+///                        exists (future, not this form).
 ///   * status='PENDING', taken=false, active=true, refillNeeded=false,
 ///     createdAt=server timestamp. (A brand-new med is never pre-marked Taken.)
 class AddMedicationWidget extends StatefulWidget {
@@ -116,15 +120,6 @@ class _AddMedicationWidgetState extends State<AddMedicationWidget> {
     final directions =
         _enteredText(_model.textFieldModel3.inputTextController);
     final timeOfDay = _model.dropdownValue ?? 'Morning';
-    final now = DateTime.now();
-    // Representative clock time for the chosen section so the tracker's
-    // Morning/Afternoon grouping and the card's 'hh:mm a' label stay coherent.
-    final scheduledTime = DateTime(
-      now.year,
-      now.month,
-      now.day,
-      timeOfDay == 'Afternoon' ? 14 : 8,
-    );
 
     try {
       await MedicationsRecord.collection.doc().set({
@@ -134,7 +129,10 @@ class _AddMedicationWidgetState extends State<AddMedicationWidget> {
           dose: dose.isEmpty ? null : dose,
           directions: directions.isEmpty ? null : directions,
           timeOfDay: timeOfDay,
-          scheduledTime: scheduledTime,
+          // V1 captures no clock time, so scheduledTime stays unset/null rather
+          // than inventing a representative 08:00/14:00 — timeOfDay above is the
+          // actual schedule value (see the class doc comment).
+          scheduledTime: null,
           status: 'PENDING',
           active: true,
           refillNeeded: false,

@@ -345,10 +345,13 @@ class _DMedicationTrackerWidgetState extends State<DMedicationTrackerWidget> {
 
   bool _isMorning(MedicationsRecord med) {
     final t = med.scheduledTime;
-    if (t == null) {
-      return true; // no time -> default to the first (Morning) section
+    if (t != null) {
+      return t.hour < 12; // legacy/demo meds carry a real clock time
     }
-    return t.hour < 12;
+    // V1 records capture no clock time (scheduledTime unset) — the
+    // Morning/Afternoon dropdown value IS the schedule value, so group by it
+    // (default to Morning when neither is present).
+    return med.timeOfDay != 'Afternoon';
   }
 
   @override

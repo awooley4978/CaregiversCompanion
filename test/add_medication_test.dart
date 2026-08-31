@@ -84,9 +84,11 @@ void main() {
     expect(data!['medicationName'], 'Lisinopril');
     expect(data['dose'], '10mg - 1 tablet');
     expect(data['directions'], 'Take with food');
-    // Default Time of Day is Morning.
+    // Default Time of Day is Morning, and it is the ACTUAL V1 schedule value.
     expect(data['timeOfDay'], 'Morning');
-    expect(data['scheduledTime'], isA<DateTime>());
+    // V1 captures no clock time — scheduledTime must be left unset (absent/null),
+    // never synthesized as a representative 08:00/14:00 from the section choice.
+    expect(data['scheduledTime'], isNull);
     // A freshly-created med is PENDING / not yet taken (so the "Taken" toggle
     // can be live-tested against it without seed data).
     expect(data['status'], 'PENDING');
