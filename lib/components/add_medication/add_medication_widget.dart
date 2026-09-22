@@ -120,6 +120,26 @@ class _AddMedicationWidgetState extends State<AddMedicationWidget> {
     final directions =
         _enteredText(_model.textFieldModel3.inputTextController);
     final timeOfDay = _model.dropdownValue ?? 'Morning';
+    // The medication carries its owner org's orgId (the caller's active group,
+    // FFAppState().activeGroupId — the same source of truth the careRecipients
+    // save uses) so the Phase-4 LIST read rule can gate the tracker's live
+    // (orgId + careRecipientRef) query on it without a get()
+    // (canListRecipientsInOrg — see firebase/firestore.rules).
+    final orgId = FFAppState().activeGroupId;
+    // orgId is REQUIRED on create by the rules (the LIST rule gates on the
+    // stored orgId, so a doc without one would poison the tracker query with a
+    // permission-denied). Fail with a clear prompt instead of an opaque denial.
+    if (orgId == null || orgId.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content:
+                Text('Your care group is not loaded yet. Please try again.'),
+          ),
+        );
+      }
+      return;
+    }
 
     try {
       await MedicationsRecord.collection.doc().set({
@@ -143,6 +163,7 @@ class _AddMedicationWidgetState extends State<AddMedicationWidget> {
             'createdAt': FieldValue.serverTimestamp(),
           },
         ),
+        'orgId': orgId,
       });
     } catch (e) {
       if (context.mounted) {

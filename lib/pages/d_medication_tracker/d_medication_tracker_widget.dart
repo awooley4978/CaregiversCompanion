@@ -46,6 +46,22 @@ bool isTakenForDay(DateTime? takenAt, DateTime now) {
   return t.year == n.year && t.month == n.month && t.day == n.day;
 }
 
+/// Groups a medication record into the Morning schedule section.
+///
+/// Legacy/demo meds carry a real clock time (`scheduledTime`): AM < 12 -> Morn.
+/// V1 records captured by the Add Medication form store NO clock time
+/// (scheduledTime unset) — there the Morning/Afternoon dropdown value IS the
+/// schedule value, so group by `timeOfDay` (defaulting to Morning when neither
+/// is present). A freshly-saved med therefore lands in the correct section and
+/// is never silently dropped.
+bool isMedicationMorning(MedicationsRecord med) {
+  final t = med.scheduledTime;
+  if (t != null) {
+    return t.hour < 12;
+  }
+  return med.timeOfDay != 'Afternoon';
+}
+
 class DMedicationTrackerWidget extends StatefulWidget {
   const DMedicationTrackerWidget({super.key});
 
@@ -343,16 +359,7 @@ class _DMedicationTrackerWidgetState extends State<DMedicationTrackerWidget> {
     );
   }
 
-  bool _isMorning(MedicationsRecord med) {
-    final t = med.scheduledTime;
-    if (t != null) {
-      return t.hour < 12; // legacy/demo meds carry a real clock time
-    }
-    // V1 records capture no clock time (scheduledTime unset) — the
-    // Morning/Afternoon dropdown value IS the schedule value, so group by it
-    // (default to Morning when neither is present).
-    return med.timeOfDay != 'Afternoon';
-  }
+  bool _isMorning(MedicationsRecord med) => isMedicationMorning(med);
 
   @override
   Widget build(BuildContext context) {
@@ -538,13 +545,30 @@ class _DMedicationTrackerWidgetState extends State<DMedicationTrackerWidget> {
                 // reminders and the adherence ring are all driven by these records.
                 // ---------------------------------------------------------------------
                 StreamBuilder<List<MedicationsRecord>>(
-                  stream: FFAppState().selectedCareRecipient == null
+                  // The live LIST query filters on orgId AS WELL AS the selected
+                  // recipient — exactly like the careRecipients list query
+                  // (`careRecipientsForActiveGroup`): the Phase-4 `medications`
+                  // LIST rule gates on resource.data.orgId
+                  // (canListRecipientsInOrg), and Firestore only exposes a field
+                  // to a list rule when the QUERY itself constrains it — an
+                  // unconstrained field reads as undefined there and the whole
+                  // query is denied. orgId is the caller's active group
+                  // (FFAppState().activeGroupId, the same source the medication
+                  // create writes); with no group context the stream stays empty
+                  // and is never an unscoped query.
+                  stream: (FFAppState().selectedCareRecipient == null ||
+                          (FFAppState().activeGroupId ?? '').isEmpty)
                       ? Stream<List<MedicationsRecord>>.value(const [])
                       : queryMedicationsRecord(
-                          queryBuilder: (q) => q.where(
-                            'careRecipientRef',
-                            isEqualTo: FFAppState().selectedCareRecipient,
-                          ),
+                          queryBuilder: (q) => q
+                              .where(
+                                'orgId',
+                                isEqualTo: FFAppState().activeGroupId,
+                              )
+                              .where(
+                                'careRecipientRef',
+                                isEqualTo: FFAppState().selectedCareRecipient,
+                              ),
                         ),
                   builder: (context, snapshot) {
                     final theme = FlutterFlowTheme.of(context);
