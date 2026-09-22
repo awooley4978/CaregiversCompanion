@@ -1,0 +1,4 @@
+# Local-only artifacts of the rules test run (npm test / firestore emulator).
+node_modules/
+*-debug.log
+firestore-debug.log

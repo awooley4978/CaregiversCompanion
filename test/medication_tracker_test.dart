@@ -26,10 +26,14 @@ void main() {
   });
   setUp(() {
     fakeFirestore.clear();
+    // The caller's active group context. The tracker's live query filters on it
+    // (see below) and the Add form writes it onto the doc.
+    FFAppState().activeGroupId = 'org_test_1';
   });
 
   // Mirrors add_medication_widget.dart _save(): writes a medications doc
-  // scoped to the SELECTED recipient with the exact fields the tracker reads.
+  // scoped to the SELECTED recipient with the exact fields the tracker reads,
+  // including the caller's active-group orgId.
   Future<void> saveMedication({
     required String name,
     String? dose,
@@ -54,6 +58,9 @@ void main() {
       ...mapToFirestore({
         'createdAt': FieldValue.serverTimestamp(),
       }),
+      // The org the Phase-4 medications LIST rule gates on
+      // (canListRecipientsInOrg(resource.data.orgId)).
+      'orgId': FFAppState().activeGroupId,
     });
   }
 
@@ -67,10 +74,16 @@ void main() {
     );
 
     // The tracker's live stream filter, used verbatim:
-    //   queryMedicationsRecord(where careRecipientRef == selected)
+    //   queryMedicationsRecord(
+    //     where('orgId') == activeGroupId
+    //       && where('careRecipientRef') == selected)
+    // BOTH filters are required: the orgId filter is what makes the field
+    // available to the Phase-4 LIST rule during query evaluation.
     final r1 = FirebaseFirestore.instance.doc('carerecipients/r1');
     final result = await queryMedicationsRecordOnce(
-      queryBuilder: (q) => q.where('careRecipientRef', isEqualTo: r1),
+      queryBuilder: (q) => q
+          .where('orgId', isEqualTo: FFAppState().activeGroupId)
+          .where('careRecipientRef', isEqualTo: r1),
     );
 
     expect(result, hasLength(1));
@@ -90,7 +103,23 @@ void main() {
     await saveMedication(name: 'Lisinopril');
     final other = FirebaseFirestore.instance.doc('carerecipients/other');
     final result = await queryMedicationsRecordOnce(
-      queryBuilder: (q) => q.where('careRecipientRef', isEqualTo: other),
+      queryBuilder: (q) => q
+          .where('orgId', isEqualTo: FFAppState().activeGroupId)
+          .where('careRecipientRef', isEqualTo: other),
+    );
+    expect(result, isEmpty);
+  });
+
+  test('the tracker query does NOT return another org\'s med', () async {
+    await saveMedication(name: 'Lisinopril');
+    final r1 = FirebaseFirestore.instance.doc('carerecipients/r1');
+    // Same recipient, different org context: the orgId filter keeps the
+    // caller's visible set to their own org (and satisfies the LIST rule, which
+    // gates on the doc's orgId being a real membership).
+    final result = await queryMedicationsRecordOnce(
+      queryBuilder: (q) => q
+          .where('orgId', isEqualTo: 'org_someone_else')
+          .where('careRecipientRef', isEqualTo: r1),
     );
     expect(result, isEmpty);
   });

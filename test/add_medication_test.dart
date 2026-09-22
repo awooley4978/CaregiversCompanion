@@ -29,6 +29,9 @@ void main() {
     fakeFirestore.clear();
     // No recipient selected by default; the selected-recipient test sets one.
     FFAppState().selectedCareRecipient = null;
+    // A default active group context so saved meds carry the orgId the rules'
+    // LIST read path gates the tracker query on.
+    FFAppState().activeGroupId = 'org_test_1';
   });
 
   Future<void> pumpForm(WidgetTester tester) async {
@@ -99,6 +102,10 @@ void main() {
     // The doc is scoped to the selected recipient — this is the field the
     // tracker's stream (and the Phase-4 rules) gate on.
     expect((data['careRecipientRef'] as dynamic).path, 'carerecipients/r1');
+    // The doc also carries the caller's active-group orgId — the field the
+    // Phase-4 rules' LIST read path uses to gate the tracker's live query
+    // (canListRecipientsInOrg), mirroring how careRecipients stores orgId.
+    expect(data['orgId'], 'org_test_1');
   });
 
   testWidgets('Save with NO recipient selected prompts and writes nothing',
@@ -121,6 +128,24 @@ void main() {
 
     expect(soleMedicationDoc(), isNull);
     expect(find.text('Enter a medication name.'), findsOneWidget);
+  });
+
+  testWidgets('Save with NO active group context prompts and writes nothing',
+      (tester) async {
+    // The rules REQUIRE orgId on create (the LIST rule gates on it), so saving
+    // with no group context must be a clear prompt, never a doc without orgId
+    // and never an opaque permission-denied.
+    FFAppState().activeGroupId = null;
+    FFAppState().selectedCareRecipient =
+        FirebaseFirestore.instance.doc('carerecipients/r1');
+    await pumpForm(tester);
+
+    await tester.enterText(find.byType(TextField).at(0), 'Metformin');
+    await tapSave(tester);
+
+    expect(soleMedicationDoc(), isNull);
+    expect(find.text('Your care group is not loaded yet. Please try again.'),
+        findsOneWidget);
   });
 
   testWidgets('blank fields render BLANK — the SlotValue sentinel is never '

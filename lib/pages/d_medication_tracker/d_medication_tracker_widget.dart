@@ -545,13 +545,30 @@ class _DMedicationTrackerWidgetState extends State<DMedicationTrackerWidget> {
                 // reminders and the adherence ring are all driven by these records.
                 // ---------------------------------------------------------------------
                 StreamBuilder<List<MedicationsRecord>>(
-                  stream: FFAppState().selectedCareRecipient == null
+                  // The live LIST query filters on orgId AS WELL AS the selected
+                  // recipient — exactly like the careRecipients list query
+                  // (`careRecipientsForActiveGroup`): the Phase-4 `medications`
+                  // LIST rule gates on resource.data.orgId
+                  // (canListRecipientsInOrg), and Firestore only exposes a field
+                  // to a list rule when the QUERY itself constrains it — an
+                  // unconstrained field reads as undefined there and the whole
+                  // query is denied. orgId is the caller's active group
+                  // (FFAppState().activeGroupId, the same source the medication
+                  // create writes); with no group context the stream stays empty
+                  // and is never an unscoped query.
+                  stream: (FFAppState().selectedCareRecipient == null ||
+                          (FFAppState().activeGroupId ?? '').isEmpty)
                       ? Stream<List<MedicationsRecord>>.value(const [])
                       : queryMedicationsRecord(
-                          queryBuilder: (q) => q.where(
-                            'careRecipientRef',
-                            isEqualTo: FFAppState().selectedCareRecipient,
-                          ),
+                          queryBuilder: (q) => q
+                              .where(
+                                'orgId',
+                                isEqualTo: FFAppState().activeGroupId,
+                              )
+                              .where(
+                                'careRecipientRef',
+                                isEqualTo: FFAppState().selectedCareRecipient,
+                              ),
                         ),
                   builder: (context, snapshot) {
                     final theme = FlutterFlowTheme.of(context);

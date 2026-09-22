@@ -407,8 +407,21 @@ service cloud.firestore {
     // collection.
     // ---------------------------------------------------------------------------
     match /medications/{docId} {
-      allow read:   if canAccessRecipientRef(get(resource.data.careRecipientRef).id);
-      allow create: if canWriteRecipientData(get(request.resource.data.careRecipientRef).id);
+      // Read split (2026-08-31 — mirrors careRecipients): single-doc GET keeps
+      // the FULL gate via canAccessRecipientRef (within-org kind-branched +
+      // grantee share + caregiver/viewer assignment). The Medication tracker
+      // pages its schedule with a LIVE LIST query (`where careRecipientRef ==
+      // selected`), and Firestore does NOT load documents during query
+      // evaluation — get() throws "Null value error" there — so LIST uses the
+      // exists()-only canListRecipientsInOrg check against the doc's stored
+      // orgId (the writer's active group, added on create for the same reason
+      // careRecipients carries it).
+      allow get:    if canAccessRecipientRef(get(resource.data.careRecipientRef).id);
+      allow list:   if canListRecipientsInOrg(resource.data.orgId);
+      // orgId is required on create so every medication carries the org its
+      // LIST rule checks (defensive, mirrors the careRecipients create rule).
+      allow create: if canWriteRecipientData(get(request.resource.data.careRecipientRef).id)
+        && request.resource.data.orgId is string;
       allow update, delete:
         if canWriteRecipientData(get(resource.data.careRecipientRef).id);
     }

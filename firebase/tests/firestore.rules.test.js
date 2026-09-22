@@ -77,9 +77,12 @@ async function seed(ctx) {
   await set('careNotes/note_prof', { careRecipientRef: PROFref,  text: 'y' });
   await set('mealEntries/meal1',   { patientRef: F1ref });
   await set('symptomEntries/sym1', { patientRef: F1ref });
-  // medications — ref-linked via careRecipientRef (enabled for the tracker)
-  await set('medications/med1',    { careRecipientRef: F1ref,    medicationName: 'Lisinopril', taken: true });
-  await set('medications/med_other',{ careRecipientRef: OTHERref, medicationName: 'X', taken: false });
+  // medications — ref-linked via careRecipientRef (enabled for the tracker).
+  // Each carries its owner org's orgId (written from the app's active group on
+  // create) so the LIST query-compatible read path can gate on it without a
+  // get() (see canListRecipientsInOrg in the rules).
+  await set('medications/med1',    { careRecipientRef: F1ref,    medicationName: 'Lisinopril', taken: true,  orgId: ORG_FAM });
+  await set('medications/med_other',{ careRecipientRef: OTHERref, medicationName: 'X', taken: false, orgId: ORG_OTHER });
 }
 
 before(async () => {
@@ -181,6 +184,12 @@ describe('MEDICATIONS (ref-linked via careRecipientRef — newly enabled)', () =
   it('owner can CREATE a medications doc referencing their recipient', async () => {
     await assertSucceeds(dbFor(OWNER).doc('medications/med_new').set({
       careRecipientRef: F1ref, medicationName: 'Metformin', taken: false,
+      orgId: ORG_FAM,
+    }));
+  });
+  it('create WITHOUT orgId is DENIED (every doc must carry the LIST rule field)', async () => {
+    await assertFails(dbFor(OWNER).doc('medications/med_noorg').set({
+      careRecipientRef: F1ref, medicationName: 'NoOrg', taken: false,
     }));
   });
   it('owner read of a DIFFERENT-org medications doc is DENIED', async () => {
@@ -203,23 +212,65 @@ describe('MEDICATIONS (ref-linked via careRecipientRef — newly enabled)', () =
     await assertSucceeds(dbFor(GRANTEE).doc('medications/med1').get());
   });
   // The medication tracker pages the schedule with a LIVE LIST query
-  // (`queryMedicationsRecord` with `where careRecipientRef == selected`), NOT a
-  // single-doc GET. A get()-based `read` rule breaks this once ≥1 matching doc
-  // exists (Firestore does not load documents during query evaluation;
-  // get() throws "Null value error"), so a saved medication never appears in
-  // the tracker despite the "Medication added." success. This pins the
-  // LIST-compatible read path (mirrors the careRecipients get/list split).
-  it('owner can LIST medications where careRecipientRef == their recipient (tracker stream)', async () => {
+  // (`queryMedicationsRecord`), NOT a single-doc GET. It filters on BOTH
+  // `orgId == <caller's active group>` AND `careRecipientRef == <selected
+  // recipient>` — the same shape as the careRecipients list query
+  // (`careRecipientsForActiveGroup`: `q.where('orgId', isEqualTo: activeGroupId)`).
+  // The orgId filter is REQUIRED, not cosmetic: Firestore only exposes a
+  // candidate document's field to a list rule when the QUERY constrains that
+  // field, so without the orgId filter `resource.data.orgId` evaluates as
+  // undefined in LIST evaluation and `canListRecipientsInOrg` denies the whole
+  // query — a saved medication would then never appear in the tracker despite
+  // the "Medication added." success. (A get()-based `read` rule fails here for
+  // the same reason once ≥1 matching doc exists.) These cases pin the tracker's
+  // real query verbatim.
+  it('owner tracker LIST (orgId + careRecipientRef) is ALLOWED', async () => {
     const q = dbFor(OWNER)
       .collection('medications')
+      .where('orgId', '==', ORG_FAM)
       .where('careRecipientRef', '==', F1ref);
     await assertSucceeds(q.get());
   });
-  it('stranger (other-org member) LIST of medications is DENIED', async () => {
+  it('stranger (other-org member) tracker LIST against the family org is DENIED', async () => {
     const q = dbFor(STRANGER)
       .collection('medications')
+      .where('orgId', '==', ORG_FAM)
       .where('careRecipientRef', '==', F1ref);
     await assertFails(q.get());
+  });
+  it('stranger tracker LIST in their OWN org returns no family med (no cross-org leak)', async () => {
+    const q = dbFor(STRANGER)
+      .collection('medications')
+      .where('orgId', '==', ORG_OTHER)
+      .where('careRecipientRef', '==', OTHERref);
+    const snap = await assertSucceeds(q.get());
+    const ids = snap.docs.map((d) => d.id);
+    if (ids.includes('med1')) {
+      throw new Error('cross-org leak in medications LIST: ' + ids.join(','));
+    }
+  });
+  // Known, deliberate limitation inherited from the Phase-4 careRecipients
+  // get/list split: LIST is MEMBERSHIP-based (canListRecipientsInOrg on the
+  // doc's orgId), while single-doc GET additionally honours a grantee share.
+  // A grantee therefore still GETs a medication (above) but a tracker LIST over
+  // the sharing org's id is denied, and a grantee-own-org LIST returns nothing
+  // for the shared recipient (no leak). Same shape as careRecipients today.
+  it('grantee tracker LIST over the sharing org is DENIED (list path is membership-based)', async () => {
+    await assertFails(dbFor(GRANTEE)
+      .collection('medications')
+      .where('orgId', '==', ORG_FAM)
+      .where('careRecipientRef', '==', F1ref)
+      .get());
+  });
+  it('grantee tracker LIST scoped to their own org returns nothing (no leak, no error)', async () => {
+    const snap = await assertSucceeds(dbFor(GRANTEE)
+      .collection('medications')
+      .where('orgId', '==', ORG_GRNT)
+      .where('careRecipientRef', '==', F1ref)
+      .get());
+    if (snap.docs.length !== 0) {
+      throw new Error('grantee LIST leaked ' + snap.docs.length + ' docs');
+    }
   });
 });
 
@@ -245,7 +296,7 @@ describe('FAMILY CAREGIVER within recipient org (non-owner)', () => {
     await assertSucceeds(db.doc('careNotes/cg_note').set({ careRecipientRef: F1ref, text: 'by caregiver' }));
     await assertSucceeds(db.doc('mealEntries/cg_meal').set({ patientRef: F1ref }));
     await assertSucceeds(db.doc('symptomEntries/cg_sym').set({ patientRef: F1ref }));
-    await assertSucceeds(db.doc('medications/cg_med').set({ careRecipientRef: F1ref, medicationName: 'Y', taken: false }));
+    await assertSucceeds(db.doc('medications/cg_med').set({ careRecipientRef: F1ref, medicationName: 'Y', taken: false, orgId: ORG_FAM }));
     await assertSucceeds(db.doc('medications/med1').update({ taken: true, status: 'TAKEN' }));
     await assertSucceeds(db.doc(`careRecipients/${REC_F1}/carechecklist/cg_item`).set({ name: 'cg' }));
   });
