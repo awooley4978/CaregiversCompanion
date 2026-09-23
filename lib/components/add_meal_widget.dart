@@ -26,6 +26,7 @@ class AddMealWidget extends StatefulWidget {
     String? mealName,
     String? amount,
     String? notes,
+    this.patientRef,
   })  : this.mealType = mealType ?? '',
         this.mealName = mealName ?? '',
         this.amount = amount ?? '',
@@ -35,6 +36,12 @@ class AddMealWidget extends StatefulWidget {
   final String mealName;
   final String amount;
   final String notes;
+
+  /// The care recipient this meal belongs to, when the opening screen already
+  /// resolved one (the Daily Dashboard resolves the route param or the app-wide
+  /// selection). Null means "use the app-wide selection", which is what every
+  /// previous caller did.
+  final DocumentReference? patientRef;
 
   @override
   State<AddMealWidget> createState() => _AddMealWidgetState();
@@ -279,8 +286,11 @@ class _AddMealWidgetState extends State<AddMealWidget> {
                 onTap: () async {
                   // §5.2 item 5: never write a null patientRef — gate on a
                   // valid selection (the Phase-4 create rule requires the ref
-                  // to be a real, accessible recipient).
-                  final selected = FFAppState().selectedCareRecipient;
+                  // to be a real, accessible recipient). The opening screen's
+                  // resolved recipient wins (the dashboard passes it), and the
+                  // app-wide selection is the fallback.
+                  final selected =
+                      widget!.patientRef ?? FFAppState().selectedCareRecipient;
                   if (selected == null) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
@@ -290,13 +300,28 @@ class _AddMealWidgetState extends State<AddMealWidget> {
                     );
                     return;
                   }
+                  // Read the values the caregiver actually TYPED. The fields
+                  // live in this widget's own model (``wrapWithModel`` hands
+                  // the same TextField2Model to the child), so before this the
+                  // form only ever saved the (empty) constructor defaults —
+                  // the meal was written with no name, amount, type or notes.
                   await MealEntriesRecord.collection.doc().set({
                     ...createMealEntriesRecordData(
                       patientRef: selected,
-                      mealType: widget!.mealType,
-                      mealName: widget!.mealName,
-                      amountEaten: widget!.amount,
-                      caregiveNote: widget!.notes,
+                      mealType: valueOrDefault<String>(
+                          _model.dropdownValue, widget!.mealType),
+                      mealName: valueOrDefault<String>(
+                          _model.textFieldModel1.inputTextController?.text
+                              .trim(),
+                          widget!.mealName),
+                      amountEaten: valueOrDefault<String>(
+                          _model.textFieldModel2.inputTextController?.text
+                              .trim(),
+                          widget!.amount),
+                      caregiveNote: valueOrDefault<String>(
+                          _model.textFieldModel3.inputTextController?.text
+                              .trim(),
+                          widget!.notes),
                     ),
                     ...mapToFirestore(
                       {

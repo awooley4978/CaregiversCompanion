@@ -1,8 +1,11 @@
+import '/backend/backend.dart';
 import '/components/button/button_widget.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/flutter_flow_widgets.dart';
 import 'dart:ui';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -18,6 +21,8 @@ class DashboardNotesFormWidget extends StatefulWidget {
     String? content,
     String? time,
     bool? isPrivate,
+    this.careRecipientRef,
+    this.note,
   })  : this.authorBg = authorBg ?? const Color(0x00000000),
         this.authorInitials = authorInitials ?? 'S',
         this.authorName = authorName ?? 'Sarah (Primary)',
@@ -32,6 +37,18 @@ class DashboardNotesFormWidget extends StatefulWidget {
   final String content;
   final String time;
   final bool isPrivate;
+
+  /// The care recipient a NEW note is written for — the Daily Dashboard
+  /// resolves it (route param or the app-wide selection) and passes it in.
+  /// The `careNotes` record is ref-linked to it, which is exactly what the
+  /// Phase-4 rules gate the write on (the recipient's org).
+  final DocumentReference? careRecipientRef;
+
+  /// An EXISTING note this sheet edits. Null means "compose a new note": the
+  /// composer starts empty, Save creates the record and Delete is not offered
+  /// (there is nothing to delete yet). With a note attached, Save updates it in
+  /// place and Delete removes it — the controls the design already rendered.
+  final CareNotesRecord? note;
 
   @override
   State<DashboardNotesFormWidget> createState() =>
@@ -51,6 +68,10 @@ class _DashboardNotesFormWidgetState extends State<DashboardNotesFormWidget> {
   void initState() {
     super.initState();
     _model = createModel(context, () => DashboardNotesFormModel());
+    _model.noteTextController ??= TextEditingController(
+      text: widget.note?.noteText ?? '',
+    );
+    _model.noteTextFocusNode ??= FocusNode();
 
     WidgetsBinding.instance.addPostFrameCallback((_) => safeSetState(() {}));
   }
@@ -62,8 +83,161 @@ class _DashboardNotesFormWidgetState extends State<DashboardNotesFormWidget> {
     super.dispose();
   }
 
+  /// Author stamped on a NEW note: the signed-in caregiver — the same rule the
+  /// Care Notes composer uses (PR #12): display name, else email, else
+  /// 'Caregiver'. The previous hardcoded 'Sarah (Primary)' is no longer shown
+  /// or written.
+  String _signedInAuthor() {
+    final user = FirebaseAuth.instance.currentUser;
+    final displayName = user?.displayName?.trim() ?? '';
+    if (displayName.isNotEmpty) {
+      return displayName;
+    }
+    final email = user?.email?.trim() ?? '';
+    return email.isNotEmpty ? email : 'Caregiver';
+  }
+
+  /// The author shown in the header: the note's own author when editing an
+  /// existing note, else the signed-in caregiver.
+  String _displayAuthor() {
+    final note = widget.note;
+    if (note != null && note.createdBy.trim().isNotEmpty) {
+      return note.createdBy.trim();
+    }
+    return _signedInAuthor();
+  }
+
+  String _initialsFor(String name) => name
+      .trim()
+      .split(RegExp(r'\s+'))
+      .where((part) => part.isNotEmpty)
+      .take(2)
+      .map((part) => part[0].toUpperCase())
+      .join();
+
+  /// Saves the composer's text: creates a `careNotes` record ref-linked to the
+  /// resolved care recipient (author = signed-in user, server timestamps — the
+  /// exact write shape of the Care Notes composer), or updates the note this
+  /// sheet was opened for.
+  Future<void> _saveNote(BuildContext context) async {
+    final text = _model.noteTextController?.text.trim() ?? '';
+    if (text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Write a note before saving.')),
+      );
+      return;
+    }
+    if (FirebaseAuth.instance.currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sign in to save a note.')),
+      );
+      return;
+    }
+    final existing = widget.note;
+    if (existing == null && widget.careRecipientRef == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Select a care recipient to add a note.'),
+        ),
+      );
+      return;
+    }
+    try {
+      if (existing != null) {
+        await existing.reference.update(
+          mapToFirestore({
+            'noteText': text,
+            'updatedAt': FieldValue.serverTimestamp(),
+          }),
+        );
+      } else {
+        await CareNotesRecord.collection.doc().set({
+          ...createCareNotesRecordData(
+            careRecipientRef: widget.careRecipientRef,
+            noteText: text,
+            createdBy: _signedInAuthor(),
+          ),
+          ...mapToFirestore({
+            'noteDateTime': FieldValue.serverTimestamp(),
+            'createdAt': FieldValue.serverTimestamp(),
+            'updatedAt': FieldValue.serverTimestamp(),
+          }),
+        });
+      }
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(existing == null ? 'Note added.' : 'Note updated.'),
+          ),
+        );
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not save the note. Please try again.'),
+          ),
+        );
+      }
+    }
+  }
+
+  /// Deletes the note this sheet was opened for — the sheet's existing confirm
+  /// dialog, which used to pop a bool and delete nothing.
+  Future<void> _deleteNote(BuildContext context) async {
+    final note = widget.note;
+    if (note == null) {
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (alertDialogContext) {
+            return AlertDialog(
+              title: Text('Delete Note?'),
+              content: Text('This note will be permanently deleted'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(alertDialogContext, false),
+                  child: Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(alertDialogContext, true),
+                  child: Text('Delete'),
+                ),
+              ],
+            );
+          },
+        ) ??
+        false;
+    if (confirmed != true || !context.mounted) {
+      return;
+    }
+    try {
+      await note.reference.delete();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Note deleted.')),
+        );
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not delete the note.')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final note = widget.note;
+    final authorName = _displayAuthor();
+    final authorInitials = _initialsFor(authorName);
+    // A new note has no timestamp yet (server-assigned on save); the header's
+    // time slot is only meaningful for an existing note.
+    final timeLabel = note == null ? 'New note' : widget.time;
     return Stack(
       children: [
         Padding(
@@ -105,10 +279,7 @@ class _DashboardNotesFormWidgetState extends State<DashboardNotesFormWidget> {
                                 ),
                                 alignment: AlignmentDirectional(0.0, 0.0),
                                 child: Text(
-                                  valueOrDefault<String>(
-                                    widget!.authorInitials,
-                                    'S',
-                                  ),
+                                  authorInitials,
                                   textAlign: TextAlign.center,
                                   maxLines: 1,
                                   style: FlutterFlowTheme.of(context)
@@ -140,10 +311,7 @@ class _DashboardNotesFormWidgetState extends State<DashboardNotesFormWidget> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    valueOrDefault<String>(
-                                      widget!.authorName,
-                                      'Sarah (Primary)',
-                                    ),
+                                    authorName,
                                     style: FlutterFlowTheme.of(context)
                                         .labelLarge
                                         .override(
@@ -172,10 +340,7 @@ class _DashboardNotesFormWidgetState extends State<DashboardNotesFormWidget> {
                                         ),
                                   ),
                                   Text(
-                                    valueOrDefault<String>(
-                                      widget!.time,
-                                      '10:30 AM',
-                                    ),
+                                    timeLabel,
                                     style: FlutterFlowTheme.of(context)
                                         .labelSmall
                                         .override(
@@ -299,30 +464,36 @@ class _DashboardNotesFormWidgetState extends State<DashboardNotesFormWidget> {
                             ),
                         ],
                       ),
-                      Text(
-                        valueOrDefault<String>(
-                          widget!.content,
-                          'Mom had a small appetite this morning. Ate about half of her breakfast (oatmeal with berries). Hydration is looking good today.',
+                      // The composer. Before this the slot rendered a
+                      // hardcoded demo sentence and Save was a print stub, so
+                      // the sheet could not write a note at all. Same look as
+                      // the Care Notes composer (filled, borderless, rounded).
+                      TextField(
+                        controller: _model.noteTextController,
+                        focusNode: _model.noteTextFocusNode,
+                        autofocus: false,
+                        maxLines: 4,
+                        minLines: 2,
+                        decoration: InputDecoration(
+                          hintText: 'Write a care note…',
+                          hintStyle:
+                              FlutterFlowTheme.of(context).bodyMedium.override(
+                                    font: GoogleFonts.nunito(),
+                                    color: FlutterFlowTheme.of(context)
+                                        .secondaryText,
+                                  ),
+                          filled: true,
+                          fillColor:
+                              FlutterFlowTheme.of(context).primaryBackground,
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 16.0,
+                            vertical: 12.0,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16.0),
+                            borderSide: BorderSide.none,
+                          ),
                         ),
-                        style: FlutterFlowTheme.of(context).bodyMedium.override(
-                              font: GoogleFonts.nunito(
-                                fontWeight: FlutterFlowTheme.of(context)
-                                    .bodyMedium
-                                    .fontWeight,
-                                fontStyle: FlutterFlowTheme.of(context)
-                                    .bodyMedium
-                                    .fontStyle,
-                              ),
-                              color: FlutterFlowTheme.of(context).primaryText,
-                              letterSpacing: 0.0,
-                              fontWeight: FlutterFlowTheme.of(context)
-                                  .bodyMedium
-                                  .fontWeight,
-                              fontStyle: FlutterFlowTheme.of(context)
-                                  .bodyMedium
-                                  .fontStyle,
-                              lineHeight: 1.5,
-                            ),
                       ),
                       Divider(
                         height: 16.0,
@@ -429,39 +600,15 @@ class _DashboardNotesFormWidgetState extends State<DashboardNotesFormWidget> {
                                     ),
                                   ),
                                 ),
-                              Align(
+                              // Delete needs a note to delete: it is only
+                              // offered when this sheet was opened for an
+                              // existing note (composing a new one has nothing
+                              // to remove). It now really deletes.
+                              if (note != null)
+                                Align(
                                 alignment: AlignmentDirectional(0.0, 0.0),
                                 child: FFButtonWidget(
-                                  onPressed: () async {
-                                    var confirmDialogResponse =
-                                        await showDialog<bool>(
-                                              context: context,
-                                              builder: (alertDialogContext) {
-                                                return AlertDialog(
-                                                  title: Text('Delete Note?'),
-                                                  content: Text(
-                                                      'This note will be permanently deleted'),
-                                                  actions: [
-                                                    TextButton(
-                                                      onPressed: () =>
-                                                          Navigator.pop(
-                                                              alertDialogContext,
-                                                              false),
-                                                      child: Text('Cancel'),
-                                                    ),
-                                                    TextButton(
-                                                      onPressed: () =>
-                                                          Navigator.pop(
-                                                              alertDialogContext,
-                                                              true),
-                                                      child: Text('Delete'),
-                                                    ),
-                                                  ],
-                                                );
-                                              },
-                                            ) ??
-                                            false;
-                                  },
+                                  onPressed: () => _deleteNote(context),
                                   text: 'Delete',
                                   options: FFButtonOptions(
                                     width: 90.0,
@@ -506,9 +653,7 @@ class _DashboardNotesFormWidgetState extends State<DashboardNotesFormWidget> {
                                 ),
                               ),
                               FFButtonWidget(
-                                onPressed: () {
-                                  print('Button pressed ...');
-                                },
+                                onPressed: () => _saveNote(context),
                                 text: 'Save',
                                 options: FFButtonOptions(
                                   width: 90.0,

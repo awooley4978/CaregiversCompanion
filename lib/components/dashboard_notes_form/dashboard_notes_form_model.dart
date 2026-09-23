@@ -16,6 +16,9 @@ class DashboardNotesFormModel
 
   ///  State fields for stateful widgets in this component.
 
+  // State field(s) for the note composer.
+  FocusNode? noteTextFocusNode;
+  TextEditingController? noteTextController;
   // Model for Button.
   late ButtonModel buttonModel1;
   // Model for Button.
@@ -35,6 +38,8 @@ class DashboardNotesFormModel
 
   @override
   void dispose() {
+    noteTextFocusNode?.dispose();
+    noteTextController?.dispose();
     buttonModel1.dispose();
     buttonModel2.dispose();
     buttonModel3.dispose();
