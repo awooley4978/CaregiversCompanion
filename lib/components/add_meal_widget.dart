@@ -84,7 +84,12 @@ class _AddMealWidgetState extends State<AddMealWidget> {
       child: Padding(
         padding: EdgeInsets.all(24.0),
         child: Container(
-          child: Column(
+          // The sheet is shown with isScrollControlled and the form can be
+          // taller than a short viewport, so the body scrolls: without this
+          // the Save row is clipped silently in a release build (no overflow
+          // stripes).
+          child: SingleChildScrollView(
+            child: Column(
             mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.start,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -300,35 +305,84 @@ class _AddMealWidgetState extends State<AddMealWidget> {
                     );
                     return;
                   }
+                  // The meal carries its owner org's orgId (the caller's active
+                  // group - the same source of truth the medications and
+                  // careRecipients writes use) so the mealEntries LIST read rule
+                  // can gate the dashboard's live (orgId + patientRef) query on it
+                  // without a get() (canListRecipientsInOrg - see
+                  // firebase/firestore.rules).
+                  final orgId = FFAppState().activeGroupId;
+                  // orgId is REQUIRED on create by the rules: the LIST rule gates on
+                  // the stored orgId, so a doc without one would poison the
+                  // dashboard meal query with a permission-denied. Fail with a clear
+                  // prompt instead of an opaque denial.
+                  if (orgId == null || orgId.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                            'Your care group is not loaded yet. Please try again.'),
+                      ),
+                    );
+                    return;
+                  }
                   // Read the values the caregiver actually TYPED. The fields
                   // live in this widget's own model (``wrapWithModel`` hands
                   // the same TextField2Model to the child), so before this the
                   // form only ever saved the (empty) constructor defaults —
                   // the meal was written with no name, amount, type or notes.
-                  await MealEntriesRecord.collection.doc().set({
-                    ...createMealEntriesRecordData(
-                      patientRef: selected,
-                      mealType: valueOrDefault<String>(
-                          _model.dropdownValue, widget!.mealType),
-                      mealName: valueOrDefault<String>(
-                          _model.textFieldModel1.inputTextController?.text
-                              .trim(),
-                          widget!.mealName),
-                      amountEaten: valueOrDefault<String>(
-                          _model.textFieldModel2.inputTextController?.text
-                              .trim(),
-                          widget!.amount),
-                      caregiveNote: valueOrDefault<String>(
-                          _model.textFieldModel3.inputTextController?.text
-                              .trim(),
-                          widget!.notes),
-                    ),
-                    ...mapToFirestore(
-                      {
-                        'createdAt': FieldValue.serverTimestamp(),
-                      },
-                    ),
-                  });
+                  try {
+                    await MealEntriesRecord.collection.doc().set({
+                      ...createMealEntriesRecordData(
+                        patientRef: selected,
+                        mealType: valueOrDefault<String>(
+                            _model.dropdownValue, widget!.mealType),
+                        mealName: valueOrDefault<String>(
+                            _model.textFieldModel1.inputTextController?.text
+                                .trim(),
+                            widget!.mealName),
+                        amountEaten: valueOrDefault<String>(
+                            _model.textFieldModel2.inputTextController?.text
+                                .trim(),
+                            widget!.amount),
+                        caregiveNote: valueOrDefault<String>(
+                            _model.textFieldModel3.inputTextController?.text
+                                .trim(),
+                            widget!.notes),
+                      ),
+                      ...mapToFirestore(
+                        {
+                          'createdAt': FieldValue.serverTimestamp(),
+                        },
+                      ),
+                      'orgId': orgId,
+                    });
+                  } catch (e) {
+                    if (!context.mounted) {
+                      return;
+                    }
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                            'Could not save this meal. Please try again.'),
+                      ),
+                    );
+                    return;
+                  }
+                  // Save feedback (owner round-5, symptom 1): the handler used to
+                  // await the write and return, so a silent write, a silent denial and
+                  // a silent no-op all looked identical - the sheet just sat there
+                  // with the typed values. Mirror AddMedicationWidget._save: confirm
+                  // the save, then close the sheet so the new meal is visible on the
+                  // dashboard card.
+                  if (!context.mounted) {
+                    return;
+                  }
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Meal saved.')),
+                  );
+                  if (Navigator.of(context).canPop()) {
+                    Navigator.of(context).pop();
+                  }
                 },
                 child: wrapWithModel(
                   model: _model.buttonModel,
@@ -351,6 +405,7 @@ class _AddMealWidgetState extends State<AddMealWidget> {
                 ),
               ),
             ].divide(SizedBox(height: 24.0)),
+          ),
           ),
         ),
       ),

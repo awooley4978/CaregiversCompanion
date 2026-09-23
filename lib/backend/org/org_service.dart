@@ -364,9 +364,12 @@ Stream<List<CareRecipientsRecord>> careRecipientsForActiveGroup({
 
 /// Recipient-scoped symptomEntries stream for the SELECTED recipient.
 ///
-/// Child data (symptomEntries, careNotes, mealEntries, carechecklist, ...)
-/// stays recipient-scoped — NO orgId field on child docs; Phase-4 rules
-/// derive access from the recipient's orgId. This fixes the dashboard's
+/// Child data (symptomEntries, careNotes, carechecklist, ...) stays
+/// recipient-scoped — NO orgId field on child docs; Phase-4 rules
+/// derive access from the recipient's orgId. The two collections whose live
+/// LIST rule needs a query-visible orgId (medications, and mealEntries since the
+/// dashboard's meal card) DO store it on create — see firebase/firestore.rules.
+/// This fixes the dashboard's
 /// cross-recipient-mix bug (audit part 3 item 7) AND the unscoped read that
 /// Phase-4 rules would deny.
 ///

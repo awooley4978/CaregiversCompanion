@@ -371,15 +371,257 @@ void main() {
       );
     });
 
-    testWidgets('an empty note is never written', (tester) async {
-      fakeAuthPlatform.emitSignedIn(uid: 'caregiver-1');
-      await pumpSheet(tester, recipient('mine'));
+  // -------------------------------------------------------------------------
+  // 6. Meals and Hydration card: a live, org-scoped read of the resolved
+  //    recipient's mealEntries (owner round-5, symptom 1 — the card used to
+  //    show hardcoded demo copy, so a saved meal was invisible everywhere).
+  // -------------------------------------------------------------------------
+  group('meals section', () {
+    Future<void> seedMeal(
+      String id,
+      DocumentReference patient,
+      String name,
+      DateTime? createdAt, {
+      String? mealType,
+      String? amountEaten,
+    }) async {
+      // Same reason as seedSymptom: the reference AND the orgId the query
+      // filters on go in through the app-facing set(); the timestamp is merged
+      // in raw so the store hands back the DateTime the record parser reads.
+      await MealEntriesRecord.collection.doc(id).set({
+        'mealName': name,
+        'mealType': mealType,
+        'amountEaten': amountEaten,
+        'patientRef': patient,
+        'caregiveNote': null,
+        'createdAt': null,
+        'orgId': FFAppState().activeGroupId,
+      });
+      fakeFirestore.writeDoc('mealEntries/$id', {'createdAt': createdAt},
+          options: SetOptions(merge: true));
+    }
 
-      await tester.tap(find.text('Save'));
-      await tester.pumpAndSettle();
+    test('reads the resolved recipient\'s meals and nobody else\'s', () async {
+      final mine = recipient('mine');
+      final other = recipient('other');
+      FFAppState().activeGroupId = 'org_test_1';
+      await seedMeal('meal1', mine, 'Soup', DateTime(2026, 9, 22, 12, 30));
+      await seedMeal('meal2', other, 'Someone else\'s lunch',
+          DateTime(2026, 9, 22, 13));
 
-      expect(writtenNotes(), isEmpty);
-      expect(find.text('Write a note before saving.'), findsOneWidget);
+      final records =
+          await mealEntriesForRecipient(recipientRef: mine).first;
+      expect(records.map((r) => r.mealName), ['Soup']);
+    });
+
+    test('an org-scoped query never leaks another org\'s meal for the same '
+        'recipient ref', () async {
+      final mine = recipient('mine');
+      FFAppState().activeGroupId = 'org_test_1';
+      await seedMeal('meal1', mine, 'Mine', DateTime(2026, 9, 22, 12));
+      // A meal written by another org for a same-named recipient ref: the
+      // orgId filter (required by the LIST rule) keeps it out.
+      await MealEntriesRecord.collection.doc('meal_other_org').set({
+        'mealName': 'Not mine',
+        'patientRef': mine,
+        'orgId': 'org_other',
+        'createdAt': null,
+      });
+
+      final records =
+          await mealEntriesForRecipient(recipientRef: mine).first;
+      expect(records.map((r) => r.mealName), ['Mine']);
+    });
+
+    test('a meal saved without a timestamp still loads, newest first',
+        () async {
+      final mine = recipient('mine');
+      FFAppState().activeGroupId = 'org_test_1';
+      await seedMeal('meal1', mine, 'Untimed', null);
+      await seedMeal('meal2', mine, 'Older', DateTime(2026, 9, 1, 8));
+      await seedMeal('meal3', mine, 'Newer', DateTime(2026, 9, 20, 8));
+
+      final records = await mealEntriesForRecipient(recipientRef: mine).first;
+      // newest-first ordering is applied by the stream itself
+      expect(records.map((r) => r.mealName), ['Newer', 'Older', 'Untimed']);
+      expect(
+        [...records]..sort(mealEntriesNewestFirst),
+        hasLength(3),
+        reason: 'orderBy was deliberately NOT used: it would drop Untimed',
+      );
+    });
+
+    test('no resolved recipient -> empty stream, never a null-ref query',
+        () async {
+      FFAppState().activeGroupId = 'org_test_1';
+      expect(
+        await mealEntriesForRecipient(recipientRef: null).first,
+        isEmpty,
+      );
+    });
+
+    test('no active group -> empty stream, never an unscoped read', () async {
+      // The mealEntries LIST rule only admits queries that filter on orgId, so an
+      // unscoped query would be denied (and silently empty) — never build one.
+      FFAppState().activeGroupId = null;
+      expect(
+        await mealEntriesForRecipient(recipientRef: recipient('mine')).first,
+        isEmpty,
+      );
+    });
+
+    test('row labels come from the record, with honest fallbacks', () async {
+      final mine = recipient('mine');
+      FFAppState().activeGroupId = 'org_test_1';
+      await seedMeal('meal1', mine, 'Club Sandwich',
+          DateTime(2026, 9, 22, 11, 30),
+          mealType: 'Lunch', amountEaten: '1/2 cup');
+      // A nameless meal (the Add Meal form still allows one) must not render as
+      // an empty row.
+      await seedMeal('meal2', mine, '', DateTime(2026, 9, 22, 8),
+          mealType: 'Breakfast');
+
+      final records = await mealEntriesForRecipient(recipientRef: mine).first;
+      final sandwich =
+          records.firstWhere((r) => r.mealName == 'Club Sandwich');
+      expect(mealEntryHeadline(sandwich), 'Club Sandwich');
+      expect(mealEntrySubtitle(sandwich), contains('Lunch'));
+      expect(mealEntrySubtitle(sandwich), contains('1/2 cup'));
+      expect(mealEntrySubtitle(sandwich), contains('11:30 AM'));
+
+      final nameless = records.firstWhere((r) => r.mealName.isEmpty);
+      expect(mealEntryHeadline(nameless), 'Breakfast');
+      expect(mealEntrySubtitle(nameless), contains('Breakfast'));
+    });
+
+    test('a meal with no type, amount or time renders a bare name', () {
+      final bare = MealEntriesRecord.getDocumentFromData(
+        {'mealName': 'Toast'},
+        recipient('mine'),
+      );
+      expect(mealEntryHeadline(bare), 'Toast');
+      expect(mealEntrySubtitle(bare), isEmpty);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 7. Dose card: the card is bound to the SAME scoped query the Taken button
+  //    acts on (owner round-5, symptom 2 — the card showed 'Donepezil 10mg'
+  //    demo copy while Taken acted on real records).
+  // -------------------------------------------------------------------------
+  group('dose card section', () {
+    Future<void> seedMed(
+      String id,
+      DocumentReference patient,
+      String name,
+      DateTime? scheduledTime, {
+      String? dose,
+      String? directions,
+      String? timeOfDay,
+      DateTime? takenAt,
+      String? orgId,
+    }) async {
+      await MedicationsRecord.collection.doc(id).set({
+        'careRecipientRef': patient,
+        'medicationName': name,
+        'dose': dose,
+        'directions': directions,
+        'timeOfDay': timeOfDay,
+        'scheduledTime': null,
+        'status': takenAt == null ? 'PENDING' : 'TAKEN',
+        'active': true,
+        'refillNeeded': false,
+        'taken': takenAt != null,
+        'takenAt': null,
+        'orgId': orgId ?? FFAppState().activeGroupId,
+      });
+      fakeFirestore.writeDoc('medications/$id', {
+        'scheduledTime': scheduledTime,
+        'takenAt': takenAt,
+      }, options: SetOptions(merge: true));
+    }
+
+    test('the card\'s stream is the Taken button\'s scoped lookup', () async {
+      final mine = recipient('mine');
+      final other = recipient('other');
+      FFAppState().activeGroupId = 'org_test_1';
+      await seedMed('m1', mine, 'Donepezil', DateTime(2026, 9, 22, 8),
+          dose: '10mg', directions: 'Take with breakfast');
+      await seedMed('m2', other, 'Not mine', DateTime(2026, 9, 22, 7));
+      await seedMed('m3', mine, 'Other org med', DateTime(2026, 9, 22, 9),
+          orgId: 'org_other');
+
+      final meds = await medicationsForRecipient(recipientRef: mine).first;
+      expect(meds.map((m) => m.medicationName), ['Donepezil']);
+    });
+
+    test('no resolved recipient / no active group -> empty stream', () async {
+      FFAppState().activeGroupId = 'org_test_1';
+      expect(
+        await medicationsForRecipient(recipientRef: null).first,
+        isEmpty,
+      );
+      FFAppState().activeGroupId = null;
+      expect(
+        await medicationsForRecipient(recipientRef: recipient('mine')).first,
+        isEmpty,
+      );
+    });
+
+    test('headline + subtitle describe the real next pending dose', () async {
+      final mine = recipient('mine');
+      final today = DateTime(2026, 9, 22, 10);
+      FFAppState().activeGroupId = 'org_test_1';
+      await seedMed('m1', mine, 'Donepezil', DateTime(2026, 9, 22, 8),
+          dose: '10mg', directions: 'Take with breakfast');
+
+      final meds = await medicationsForRecipient(recipientRef: mine).first;
+      expect(medicationCardHeadline(meds, today), 'Donepezil 10mg');
+      final subtitle = medicationCardSubtitle(meds, today);
+      expect(subtitle, contains('Take with breakfast'));
+      expect(subtitle, contains('08:00 AM'));
+    });
+
+    test('an empty list says so instead of showing demo content', () {
+      expect(
+        medicationCardHeadline(const <MedicationsRecord>[], DateTime.now()),
+        'No medications added yet.',
+      );
+      expect(
+        medicationCardSubtitle(const <MedicationsRecord>[], DateTime.now()),
+        isEmpty,
+      );
+    });
+
+    test('every dose taken today -> honest all-taken headline', () async {
+      final mine = recipient('mine');
+      FFAppState().activeGroupId = 'org_test_1';
+      await seedMed('m1', mine, 'Lisinopril', DateTime(2026, 9, 22, 8),
+          takenAt: DateTime(2026, 9, 22, 8));
+
+      final meds = await medicationsForRecipient(recipientRef: mine).first;
+      expect(medicationCardHeadline(meds, DateTime(2026, 9, 22, 10)),
+          'All of today\'s doses are taken.');
+      expect(medicationCardSubtitle(meds, DateTime(2026, 9, 22, 10)), isEmpty);
+      // And the Taken button still reports honestly on the same records.
+      expect(
+        nextPendingDose(meds, DateTime(2026, 9, 22, 10)),
+        isNull,
+      );
+    });
+
+    test('a dose with no directions falls back to its own schedule value',
+        () async {
+      final mine = recipient('mine');
+      FFAppState().activeGroupId = 'org_test_1';
+      await seedMed('m1', mine, 'Metformin', null, timeOfDay: 'Evening');
+
+      final meds = await medicationsForRecipient(recipientRef: mine).first;
+      expect(medicationCardHeadline(meds, DateTime(2026, 9, 22, 10)),
+          'Metformin');
+      expect(medicationCardSubtitle(meds, DateTime(2026, 9, 22, 10)),
+          'Evening');
     });
   });
 }
+

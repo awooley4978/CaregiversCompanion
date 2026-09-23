@@ -148,6 +148,140 @@ MedicationsRecord? nextPendingDose(List<MedicationsRecord> meds, DateTime now) {
   return null;
 }
 
+/// Newest-first ordering for the Meals list, applied in Dart.
+///
+/// Same reason as [symptomEntriesNewestFirst]: `orderBy('createdAt')` silently
+/// drops every entry written without a timestamp, which is how the card can
+/// query "successfully" and still never show a meal.
+int mealEntriesNewestFirst(MealEntriesRecord a, MealEntriesRecord b) {
+  final ta = a.createdAt;
+  final tb = b.createdAt;
+  if (ta == null && tb == null) {
+    return 0;
+  }
+  if (ta == null) {
+    return 1;
+  }
+  if (tb == null) {
+    return -1;
+  }
+  return tb.compareTo(ta);
+}
+
+/// The resolved recipient's meals, newest first - the live read behind the
+/// 'Meals and Hydration' card (owner round-5, symptom 1: a saved meal was
+/// invisible everywhere in the app because nothing read this collection).
+///
+/// The query is scoped EXACTLY like the medications list (orgId == the caller's
+/// active group AND patientRef == the recipient) for the same Phase-4 rules
+/// reason: a Firestore LIST rule cannot `get()` a candidate document, so the
+/// mealEntries LIST rule gates on the STORED orgId (canListRecipientsInOrg) and
+/// only a query that filters on that field can read it. Without the orgId filter
+/// the list is denied live even after a confirmed save.
+@visibleForTesting
+Stream<List<MealEntriesRecord>> mealEntriesForRecipient({
+  required DocumentReference? recipientRef,
+}) {
+  final orgId = FFAppState().activeGroupId;
+  if (recipientRef == null || orgId == null || orgId.isEmpty) {
+    return Stream.value(const []);
+  }
+  return queryMealEntriesRecord(
+    queryBuilder: (q) => q
+        .where('orgId', isEqualTo: orgId)
+        .where('patientRef', isEqualTo: recipientRef),
+  ).map((records) => [...records]..sort(mealEntriesNewestFirst));
+}
+
+/// The resolved recipient's medications - the live stream behind the 'Taken'
+/// dose card, built with the SAME scoped lookup [_markTaken] runs
+/// (orgId + careRecipientRef: the field set the Phase-4 medications LIST rule
+/// gates on). The card used to render hardcoded demo content ('Donepezil
+/// 10mg') that no record backed, while the Taken button acted on real data -
+/// the contradiction the owner reported as "it's on a dose card".
+@visibleForTesting
+Stream<List<MedicationsRecord>> medicationsForRecipient({
+  required DocumentReference? recipientRef,
+}) {
+  final orgId = FFAppState().activeGroupId;
+  if (recipientRef == null || orgId == null || orgId.isEmpty) {
+    return Stream.value(const []);
+  }
+  return queryMedicationsRecord(
+    queryBuilder: (q) => q
+        .where('orgId', isEqualTo: orgId)
+        .where('careRecipientRef', isEqualTo: recipientRef),
+  );
+}
+
+/// How many meals the dashboard card lists before summarising the rest: the card
+/// is a daily summary, not the full history, and the live read is newest-first.
+const dashboardMealsShown = 3;
+
+/// The dose card's headline: the next pending dose ("Donepezil 10mg"), the
+/// honest empty state, or the all-taken state. Built on the same
+/// [nextPendingDose] the Taken button acts on, so the card can no longer
+/// describe a dose the action cannot find.
+@visibleForTesting
+String medicationCardHeadline(List<MedicationsRecord> meds, DateTime now) {
+  if (meds.isEmpty) {
+    return 'No medications added yet.';
+  }
+  final dose = nextPendingDose(meds, now);
+  if (dose == null) {
+    return 'All of today\'s doses are taken.';
+  }
+  final name = dose.medicationName.trim();
+  final amount = dose.dose.trim();
+  final labelled = name.isEmpty ? 'Medication' : name;
+  return amount.isEmpty ? labelled : '$labelled $amount';
+}
+
+/// The dose card's second line ("Take with breakfast • 8:00 AM"), built
+/// from the next pending dose's real schedule fields. Empty when there is
+/// nothing truthful to show (no medications at all, or every dose already taken
+/// today).
+@visibleForTesting
+String medicationCardSubtitle(List<MedicationsRecord> meds, DateTime now) {
+  final dose = nextPendingDose(meds, now);
+  if (dose == null) {
+    return '';
+  }
+  final directions = dose.directions.trim();
+  final timeOfDay = dose.timeOfDay.trim();
+  final schedule = directions.isNotEmpty ? directions : timeOfDay;
+  final parts = <String>[
+    if (schedule.isNotEmpty) schedule,
+    if (dose.scheduledTime != null)
+      dateTimeFormat('hh:mm a', dose.scheduledTime),
+  ];
+  return parts.join(' • ');
+}
+
+/// A meal row's headline: the meal's own name (or its type when the caregiver
+/// saved a nameless meal - the Add Meal form still allows that).
+@visibleForTesting
+String mealEntryHeadline(MealEntriesRecord meal) {
+  final name = meal.mealName.trim();
+  if (name.isNotEmpty) {
+    return name;
+  }
+  final type = meal.mealType.trim();
+  return type.isEmpty ? 'Meal' : type;
+}
+
+/// A meal row's second line - the fields the Add Meal sheet captured
+/// ("Lunch • 1/2 cup • 11:30 AM"), in the card's existing subtitle style.
+@visibleForTesting
+String mealEntrySubtitle(MealEntriesRecord meal) {
+  final parts = <String>[
+    if (meal.mealType.trim().isNotEmpty) meal.mealType.trim(),
+    if (meal.amountEaten.trim().isNotEmpty) meal.amountEaten.trim(),
+    if (meal.createdAt != null) dateTimeFormat('hh:mm a', meal.createdAt),
+  ];
+  return parts.join(' • ');
+}
+
 class CDailyDashboardWidget extends StatefulWidget {
   const CDailyDashboardWidget({
     super.key,
@@ -851,7 +985,26 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                                 ),
                                                 Expanded(
                                                   flex: 1,
-                                                  child: Column(
+                                                  child: StreamBuilder<List<MedicationsRecord>>(
+                                                    // Live replacement for the hardcoded "Donepezil 10mg" demo
+                                                    // card: the exact scoped query the Taken button below runs, so
+                                                    // the card describes the real record(s) - or says honestly
+                                                    // that there are none.
+                                                    stream: medicationsForRecipient(recipientRef: _recipientRef),
+                                                    builder: (context, snapshot) {
+                                                      final meds = snapshot.data ??
+                                                        const <MedicationsRecord>[];
+                                                      final now = DateTime.now();
+                                                      final doseHeadline = snapshot.hasError
+                                                        ? 'Could not load medications.'
+                                                        : (snapshot.hasData
+                                                          ? medicationCardHeadline(meds, now)
+                                                          : 'Loading medications…');
+                                                      final doseSubtitle =
+                                                        (!snapshot.hasData || snapshot.hasError)
+                                                        ? ''
+                                                        : medicationCardSubtitle(meds, now);
+                                                      return Column(
                                                     mainAxisSize:
                                                         MainAxisSize.min,
                                                     mainAxisAlignment:
@@ -861,7 +1014,7 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                                             .start,
                                                     children: [
                                                       Text(
-                                                        'Donepezil 10mg',
+                                                        doseHeadline,
                                                         style:
                                                             FlutterFlowTheme.of(
                                                                     context)
@@ -893,8 +1046,8 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                                                       1.6,
                                                                 ),
                                                       ),
-                                                      Text(
-                                                        'Take with breakfast • 8:00 AM',
+                                                      if (doseSubtitle.isNotEmpty) Text(
+                                                        doseSubtitle,
                                                         style:
                                                             FlutterFlowTheme.of(
                                                                     context)
@@ -930,6 +1083,7 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                                       ),
                                                     ].divide(
                                                         SizedBox(height: 2.0)),
+                                                    },
                                                   ),
                                                 ),
                                                 InkWell(
@@ -1374,74 +1528,72 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                                             safeSetState(
                                                                 () {}));
                                                       },
-                                                      child: Text(
-                                                        'Sandwich and Soup',
-                                                        style:
-                                                            FlutterFlowTheme.of(
-                                                                    context)
-                                                                .bodyLarge
-                                                                .override(
-                                                                  font: GoogleFonts
-                                                                      .nunito(
-                                                                    fontWeight:
-                                                                        FontWeight
-                                                                            .w600,
-                                                                    fontStyle: FlutterFlowTheme.of(
-                                                                            context)
-                                                                        .bodyLarge
-                                                                        .fontStyle,
-                                                                  ),
-                                                                  color: FlutterFlowTheme.of(
-                                                                          context)
-                                                                      .primaryText,
-                                                                  letterSpacing:
-                                                                      0.0,
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .w600,
-                                                                  fontStyle: FlutterFlowTheme.of(
-                                                                          context)
-                                                                      .bodyLarge
-                                                                      .fontStyle,
-                                                                  lineHeight:
-                                                                      1.6,
-                                                                ),
-                                                      ),
-                                                    ),
-                                                    Text(
-                                                      'Club Sandwich and Potato Soup • 11:30 AM',
-                                                      style:
-                                                          FlutterFlowTheme.of(
-                                                                  context)
+                                                        child: StreamBuilder<List<MealEntriesRecord>>(
+                                                          // This card used to show hardcoded demo copy (a saved meal
+                                                          // was invisible everywhere in the app). It now reads the
+                                                          // recipient's real meals, newest first.
+                                                          stream: mealEntriesForRecipient(recipientRef: _recipientRef),
+                                                          builder: (context, snapshot) {
+                                                            final mutedStyle = FlutterFlowTheme.of(context)
                                                               .bodySmall
                                                               .override(
-                                                                font:
-                                                                    GoogleFonts
-                                                                        .nunito(
-                                                                  fontWeight: FlutterFlowTheme.of(
-                                                                          context)
-                                                                      .bodySmall
-                                                                      .fontWeight,
-                                                                  fontStyle: FlutterFlowTheme.of(
-                                                                          context)
-                                                                      .bodySmall
-                                                                      .fontStyle,
+                                                                font: GoogleFonts.nunito(
+                                                                  fontWeight:
+                                                                    FlutterFlowTheme.of(context).bodySmall.fontWeight,
+                                                                  fontStyle:
+                                                                    FlutterFlowTheme.of(context).bodySmall.fontStyle,
                                                                 ),
-                                                                color: FlutterFlowTheme.of(
-                                                                        context)
-                                                                    .secondaryText,
-                                                                letterSpacing:
-                                                                    0.0,
-                                                                fontWeight: FlutterFlowTheme.of(
-                                                                        context)
-                                                                    .bodySmall
-                                                                    .fontWeight,
-                                                                fontStyle: FlutterFlowTheme.of(
-                                                                        context)
-                                                                    .bodySmall
-                                                                    .fontStyle,
+                                                                color: FlutterFlowTheme.of(context).secondaryText,
+                                                                letterSpacing: 0.0,
+                                                                fontWeight:
+                                                                  FlutterFlowTheme.of(context).bodySmall.fontWeight,
+                                                                fontStyle:
+                                                                  FlutterFlowTheme.of(context).bodySmall.fontStyle,
                                                                 lineHeight: 1.5,
-                                                              ),
+                                                              );
+                                                            // A denied or still-loading query must not leave the card
+                                                            // spinning, and an empty collection must not keep showing
+                                                            // demo food.
+                                                            if (snapshot.hasError) {
+                                                              return Text(
+                                                                'Could not load meals.',
+                                                                style: mutedStyle,
+                                                              );
+                                                            }
+                                                            if (!snapshot.hasData) {
+                                                              return Text(
+                                                                'Loading meals…',
+                                                                style: mutedStyle,
+                                                              );
+                                                            }
+                                                            final meals = snapshot.data!;
+                                                            if (meals.isEmpty) {
+                                                              return Text(
+                                                                'No meals logged yet',
+                                                                style: mutedStyle,
+                                                              );
+                                                            }
+                                                            final shown = meals.take(dashboardMealsShown).toList();
+                                                            final extra = meals.length - shown.length;
+                                                            return Column(
+                                                              mainAxisSize: MainAxisSize.min,
+                                                              mainAxisAlignment: MainAxisAlignment.start,
+                                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                                              children: [
+                                                                for (final meal in shown) _DashboardMealRow(meal),
+                                                                if (extra > 0)
+                                                                  Padding(
+                                                                    padding: EdgeInsetsDirectional.fromSTEB(
+                                                                      0.0, 4.0, 0.0, 0.0),
+                                                                    child: Text(
+                                                                      '+$extra earlier meal${extra == 1 ? '' : 's'}',
+                                                                      style: mutedStyle,
+                                                                    ),
+                                                                  ),
+                                                              ].divide(SizedBox(height: 8.0)),
+                                                            );
+                                                          },
+                                                        ),
                                                     ),
                                                   ].divide(
                                                       SizedBox(height: 2.0)),
@@ -2509,6 +2661,60 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// One meal line on the dashboard's 'Meals and Hydration' card: the card's
+/// existing row visual language (meal name + "type • amount • time"), bound
+/// to a real `mealEntries` record instead of the demo copy the card used to show.
+class _DashboardMealRow extends StatelessWidget {
+  const _DashboardMealRow(this.meal);
+
+  final MealEntriesRecord meal;
+
+  @override
+  Widget build(BuildContext context) {
+    final subtitle = mealEntrySubtitle(meal);
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          mealEntryHeadline(meal),
+          style: FlutterFlowTheme.of(context).bodyLarge.override(
+                font: GoogleFonts.nunito(
+                  fontWeight: FontWeight.w600,
+                  fontStyle: FlutterFlowTheme.of(context).bodyLarge.fontStyle,
+                ),
+                color: FlutterFlowTheme.of(context).primaryText,
+                letterSpacing: 0.0,
+                fontWeight: FontWeight.w600,
+                fontStyle: FlutterFlowTheme.of(context).bodyLarge.fontStyle,
+                lineHeight: 1.6,
+              ),
+        ),
+        if (subtitle.isNotEmpty)
+          Text(
+            subtitle,
+            style: FlutterFlowTheme.of(context).bodySmall.override(
+                  font: GoogleFonts.nunito(
+                    fontWeight:
+                        FlutterFlowTheme.of(context).bodySmall.fontWeight,
+                    fontStyle:
+                        FlutterFlowTheme.of(context).bodySmall.fontStyle,
+                  ),
+                  color: FlutterFlowTheme.of(context).secondaryText,
+                  letterSpacing: 0.0,
+                  fontWeight:
+                      FlutterFlowTheme.of(context).bodySmall.fontWeight,
+                  fontStyle: FlutterFlowTheme.of(context).bodySmall.fontStyle,
+                  lineHeight: 1.5,
+                ),
+          ),
+      ].divide(SizedBox(height: 2.0)),
     );
   }
 }
