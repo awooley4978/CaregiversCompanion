@@ -370,6 +370,15 @@ void main() {
         findsOneWidget,
       );
     });
+    testWidgets('an empty note is never written', (tester) async {
+      fakeAuthPlatform.emitSignedIn(uid: 'caregiver-1');
+      await pumpSheet(tester, recipient('mine'));
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(writtenNotes(), isEmpty);
+      expect(find.text('Write a note before saving.'), findsOneWidget);
+    });
+  });
 
   // -------------------------------------------------------------------------
   // 6. Meals and Hydration card: a live, org-scoped read of the resolved
