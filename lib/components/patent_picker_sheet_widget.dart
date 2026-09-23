@@ -21,6 +21,11 @@ class PatentPickerSheetWidget extends StatefulWidget {
 class _PatentPickerSheetWidgetState extends State<PatentPickerSheetWidget> {
   late PatentPickerSheetModel _model;
 
+  // Per-row hover index for the care-recipient list. The list is dynamic, so a
+  // single shared hover bool would light up every row at once; tracking which
+  // index is hovered keeps each row's highlight independent (design unchanged).
+  int _hoveredRecipientIndex = -1;
+
   @override
   void setState(VoidCallback callback) {
     super.setState(callback);
@@ -119,7 +124,7 @@ class _PatentPickerSheetWidgetState extends State<PatentPickerSheetWidget> {
                           curve: Curves.easeInOut,
                           width: double.infinity,
                           decoration: BoxDecoration(
-                            color: _model.iuserHovered1!
+                            color: listViewIndex == _hoveredRecipientIndex
                                 ? FlutterFlowTheme.of(context).primaryBackground
                                 : FlutterFlowTheme.of(context)
                                     .secondaryBackground,
@@ -180,10 +185,15 @@ class _PatentPickerSheetWidgetState extends State<PatentPickerSheetWidget> {
                           ),
                         ),
                         onEnter: ((event) async {
-                          safeSetState(() => _model.iuserHovered1 = true);
+                          safeSetState(
+                              () => _hoveredRecipientIndex = listViewIndex);
                         }),
                         onExit: ((event) async {
-                          safeSetState(() => _model.iuserHovered1 = false);
+                          safeSetState(() {
+                            if (_hoveredRecipientIndex == listViewIndex) {
+                              _hoveredRecipientIndex = -1;
+                            }
+                          });
                         }),
                       );
                     },
