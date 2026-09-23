@@ -257,7 +257,10 @@ void main() {
       final updated =
           readBack.firstWhere((m) => m.medicationName == 'Donepezil');
       expect(updated.taken, isTrue);
-      expect(isTakenForDay(updated.takenAt, today), isTrue);
+      // The Taken write stamps Firestore's SERVER time (the memory fake resolves
+      // it to "now"), so the dose reads as taken on the current day. The fixed
+      // `today` above only decides which dose counted as the next pending one.
+      expect(isTakenForDay(updated.takenAt, DateTime.now()), isTrue);
 
       // The dose that was already taken today is left exactly as it was.
       final alreadyTaken =
