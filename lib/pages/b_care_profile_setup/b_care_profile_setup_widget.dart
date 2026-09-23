@@ -20,6 +20,54 @@ import 'package:provider/provider.dart';
 import 'b_care_profile_setup_model.dart';
 export 'b_care_profile_setup_model.dart';
 
+/// The built-in condition chips on this page, in the order they are laid out in
+/// the condition Wrap below. The chips are fed from this list, so the names the
+/// page saves can never drift from the labels the caregiver sees.
+const kCareProfileConditionChipLabels = <String>[
+  'Diabetes',
+  'Hypertension',
+  'Heart Failure',
+  'Dementia',
+  'Limited Mobility',
+  'Fall Risk',
+  'Wound Care',
+];
+
+/// Collects the conditions to save for a care profile: every selected built-in
+/// chip, plus the free-text 'Other / Add Your Own' entry when the caregiver
+/// typed one (owner-approved 2026-09-23 — the chips used to be static
+/// decoration, and nothing the caregiver picked was written to the recipient's
+/// Conditions field).
+///
+/// Each chip's selection is read off that chip's own widget model, the same
+/// pattern the Tracking Modules use via `switchModel.switchValue`, so the page
+/// keeps no second copy of the selection state. Top-level so its contract can
+/// be pinned in a test without rendering the whole page.
+List<String> careProfileConditionsToSave(
+  List<ConditionChipModel> chipModels, {
+  String? otherCondition,
+}) {
+  assert(
+    chipModels.length == kCareProfileConditionChipLabels.length,
+    'one ConditionChipModel per built-in condition chip',
+  );
+
+  final conditions = <String>[
+    for (var i = 0; i < chipModels.length; i++)
+      if (valueOrDefault<bool>(chipModels[i].selectedValue, false))
+        kCareProfileConditionChipLabels[i],
+  ];
+
+  // 'Other / Add Your Own': a typed condition is saved too, once, without
+  // dropping the built-in chip that already covers it.
+  final other = otherCondition?.trim() ?? '';
+  if (other.isNotEmpty && !conditions.contains(other)) {
+    conditions.add(other);
+  }
+
+  return conditions;
+}
+
 class BCareProfileSetupWidget extends StatefulWidget {
   const BCareProfileSetupWidget({super.key});
 
@@ -410,7 +458,8 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
                                       model: _model.conditionChipModel1,
                                       updateCallback: () => safeSetState(() {}),
                                       child: ConditionChipWidget(
-                                        label: 'Diabetes',
+                                        label:
+                                            kCareProfileConditionChipLabels[0],
                                         selected: true,
                                       ),
                                     ),
@@ -418,7 +467,8 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
                                       model: _model.conditionChipModel2,
                                       updateCallback: () => safeSetState(() {}),
                                       child: ConditionChipWidget(
-                                        label: 'Hypertension',
+                                        label:
+                                            kCareProfileConditionChipLabels[1],
                                         selected: true,
                                       ),
                                     ),
@@ -426,7 +476,8 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
                                       model: _model.conditionChipModel3,
                                       updateCallback: () => safeSetState(() {}),
                                       child: ConditionChipWidget(
-                                        label: 'Heart Failure',
+                                        label:
+                                            kCareProfileConditionChipLabels[2],
                                         selected: false,
                                       ),
                                     ),
@@ -434,7 +485,8 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
                                       model: _model.conditionChipModel4,
                                       updateCallback: () => safeSetState(() {}),
                                       child: ConditionChipWidget(
-                                        label: 'Dementia',
+                                        label:
+                                            kCareProfileConditionChipLabels[3],
                                         selected: false,
                                       ),
                                     ),
@@ -442,7 +494,8 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
                                       model: _model.conditionChipModel5,
                                       updateCallback: () => safeSetState(() {}),
                                       child: ConditionChipWidget(
-                                        label: 'Limited Mobility',
+                                        label:
+                                            kCareProfileConditionChipLabels[4],
                                         selected: true,
                                       ),
                                     ),
@@ -450,7 +503,8 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
                                       model: _model.conditionChipModel6,
                                       updateCallback: () => safeSetState(() {}),
                                       child: ConditionChipWidget(
-                                        label: 'Fall Risk',
+                                        label:
+                                            kCareProfileConditionChipLabels[5],
                                         selected: true,
                                       ),
                                     ),
@@ -458,7 +512,8 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
                                       model: _model.conditionChipModel7,
                                       updateCallback: () => safeSetState(() {}),
                                       child: ConditionChipWidget(
-                                        label: 'Wound Care',
+                                        label:
+                                            kCareProfileConditionChipLabels[6],
                                         selected: false,
                                       ),
                                     ),
@@ -828,6 +883,21 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
                                     data: createCareRecipientsRecordData(
                                       name: _model.textFieldNameModel
                                           .inputTextController.text,
+                                      conditions: careProfileConditionsToSave(
+                                        [
+                                          _model.conditionChipModel1,
+                                          _model.conditionChipModel2,
+                                          _model.conditionChipModel3,
+                                          _model.conditionChipModel4,
+                                          _model.conditionChipModel5,
+                                          _model.conditionChipModel6,
+                                          _model.conditionChipModel7,
+                                        ],
+                                        otherCondition: _model
+                                            .textFieldAddConditionModel
+                                            .inputTextController
+                                            ?.text,
+                                      ),
                                       primaryCondition: _model
                                           .textFieldPrimaryModel
                                           .inputTextController
