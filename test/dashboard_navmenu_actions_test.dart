@@ -17,9 +17,13 @@
 // so the contracts are pinned through the top-level functions the page itself
 // calls, plus a direct widget test of the note sheet.
 //
-// Seeding goes through `fakeFirestore.writeDoc` (raw store) rather than the
-// app-facing `set()` for the DateTime-bearing rows, so the rows parse exactly
-// as stored — same trick medication_taken_test uses for `takenAt`.
+// Seeding goes through the app-facing `set()` — the write path the scope query's
+// `where(==)` value is encoded on too — with the DateTime-bearing fields merged
+// in raw afterwards so the store hands them back as plain DateTimes the record
+// parser reads. A raw store map (`fakeFirestore.dataAt`) holds the
+// platform-encoded reference, so it is fine for field-by-field assertions but
+// must never be handed to `getDocumentFromData`: only the app-facing read paths
+// decode references back into document references.
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -240,23 +244,25 @@ void main() {
       // The exact write the dashboard's Taken button performs.
       await dose!.reference.update(medicationTakenUpdate(taken: true));
 
+      // The raw store map proves the exact payload landed. It holds the
+      // PLATFORM-encoded reference (the form the where(==) filter matched on),
+      // so the document is re-read through the app-facing query — the path that
+      // decodes references — before the record parser sees it.
       final stored = fakeFirestore.dataAt('medications/m2')!;
       expect(stored['taken'], isTrue);
       expect(stored['status'], 'TAKEN');
       expect(stored['takenAt'], isNotNull);
+
+      final readBack = await scopedMeds(mine);
       final updated =
-          MedicationsRecord.getDocumentFromData(stored, dose.reference);
+          readBack.firstWhere((m) => m.medicationName == 'Donepezil');
       expect(updated.taken, isTrue);
       expect(isTakenForDay(updated.takenAt, today), isTrue);
 
       // The dose that was already taken today is left exactly as it was.
-      expect(
-        MedicationsRecord.getDocumentFromData(
-          fakeFirestore.dataAt('medications/m1')!,
-          FirebaseFirestore.instance.doc('medications/m1'),
-        ).takenAt!.hour,
-        8,
-      );
+      final alreadyTaken =
+          readBack.firstWhere((m) => m.medicationName == 'Lisinopril');
+      expect(alreadyTaken.takenAt!.hour, 8);
     });
 
     test('leaves the records alone when every dose is taken today', () async {
