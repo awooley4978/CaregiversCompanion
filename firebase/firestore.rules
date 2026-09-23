@@ -381,8 +381,21 @@ service cloud.firestore {
     // mealEntries — ref-linked via patientRef (see careNotes note above)
     // ---------------------------------------------------------------------------
     match /mealEntries/{docId} {
-      allow read:   if canAccessRecipientRef(get(resource.data.patientRef).id);
-      allow create: if canWriteRecipientData(get(request.resource.data.patientRef).id);
+      // Read split (2026-09-23 — mirrors medications): single-doc GET keeps the
+      // FULL gate via canAccessRecipientRef (within-org kind-branched + grantee
+      // share + caregiver/viewer assignment). The Daily Dashboard now lists the
+      // recipient's meals with a LIVE LIST query (`where patientRef ==
+      // recipient`), and Firestore does NOT load documents during query
+      // evaluation — get() throws "Null value error" there — so LIST uses the
+      // exists()-only canListRecipientsInOrg check against the doc's stored
+      // orgId (the writer's active group, added on create for the same reason
+      // careRecipients and medications carry it).
+      allow get:    if canAccessRecipientRef(get(resource.data.patientRef).id);
+      allow list:   if canListRecipientsInOrg(resource.data.orgId);
+      // orgId is required on create so every meal carries the org its LIST rule
+      // checks (defensive, mirrors the careRecipients / medications create rule).
+      allow create: if canWriteRecipientData(get(request.resource.data.patientRef).id)
+        && request.resource.data.orgId is string;
       allow update, delete:
         if canWriteRecipientData(get(resource.data.patientRef).id);
     }
