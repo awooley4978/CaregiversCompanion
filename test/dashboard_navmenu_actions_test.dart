@@ -76,23 +76,30 @@ void main() {
   //    says, and never drops an entry that has no logged time.
   // -------------------------------------------------------------------------
   group('symptoms section', () {
-    void seedSymptom(String id, DocumentReference patient, String name,
-        DateTime? timeLogged) {
-      fakeFirestore.writeDoc('symptomEntries/$id', {
+    Future<void> seedSymptom(String id, DocumentReference patient,
+        String name, DateTime? timeLogged) async {
+      // Seeded through the app-facing set(): that is the write path the query's
+      // condition value is encoded on too (a raw store write leaves the
+      // reference unconverted, so where(patientRef == ...) never matches), and
+      // the logged time is then merged in raw so the store hands it back as the
+      // DateTime the record parser reads.
+      await SymptomEntriesRecord.collection.doc(id).set({
         'symptomName': name,
         'patientRef': patient,
-        'timeLogged': timeLogged,
+        'timeLogged': null,
         'note': 'logged by caregiver',
         'isResolved': false,
       });
+      fakeFirestore.writeDoc('symptomEntries/$id', {'timeLogged': timeLogged},
+          options: SetOptions(merge: true));
     }
 
     test('reads the resolved recipient\'s entries and nobody else\'s',
         () async {
       final mine = recipient('mine');
       final other = recipient('other');
-      seedSymptom('s1', mine, 'Dizziness', DateTime(2026, 9, 21, 8));
-      seedSymptom('s2', other, 'Headache', DateTime(2026, 9, 21, 9));
+      await seedSymptom('s1', mine, 'Dizziness', DateTime(2026, 9, 21, 8));
+      await seedSymptom('s2', other, 'Headache', DateTime(2026, 9, 21, 9));
       // A stale selection must not leak the other recipient's data in.
       FFAppState().selectedCareRecipient = other;
 
@@ -103,9 +110,9 @@ void main() {
 
     test('an entry with no logged time still loads, newest first', () async {
       final mine = recipient('mine');
-      seedSymptom('s1', mine, 'Untimed', null);
-      seedSymptom('s2', mine, 'Older', DateTime(2026, 9, 1, 8));
-      seedSymptom('s3', mine, 'Newer', DateTime(2026, 9, 20, 8));
+      await seedSymptom('s1', mine, 'Untimed', null);
+      await seedSymptom('s2', mine, 'Older', DateTime(2026, 9, 1, 8));
+      await seedSymptom('s3', mine, 'Newer', DateTime(2026, 9, 20, 8));
 
       final records = [
         ...await symptomEntriesForRecipient(recipientRef: mine).first
@@ -174,25 +181,32 @@ void main() {
   //    Tracker uses, resolved from the dashboard recipient.
   // -------------------------------------------------------------------------
   group('medication Taken action', () {
-    void seedMed(
+    Future<void> seedMed(
       String id,
       DocumentReference patient,
       String name,
       DateTime? scheduledTime, {
       DateTime? takenAt,
-    }) {
-      fakeFirestore.writeDoc('medications/$id', {
+    }) async {
+      // Same reason as seedSymptom: the reference (and the orgId the action's
+      // query filters on) goes in through the app-facing set(); the two
+      // timestamps are merged in raw.
+      await MedicationsRecord.collection.doc(id).set({
         'careRecipientRef': patient,
         'medicationName': name,
         'timeOfDay': 'Morning',
-        'scheduledTime': scheduledTime,
+        'scheduledTime': null,
         'status': takenAt == null ? 'PENDING' : 'TAKEN',
         'active': true,
         'refillNeeded': false,
         'taken': takenAt != null,
-        'takenAt': takenAt,
+        'takenAt': null,
         'orgId': FFAppState().activeGroupId,
       });
+      fakeFirestore.writeDoc('medications/$id', {
+        'scheduledTime': scheduledTime,
+        'takenAt': takenAt,
+      }, options: SetOptions(merge: true));
     }
 
     /// The tracker's own list query — the lookup the dashboard's Taken action
@@ -211,11 +225,11 @@ void main() {
       FFAppState().activeGroupId = 'org_test_1';
       final today = DateTime(2026, 9, 22, 10);
 
-      seedMed('m1', mine, 'Lisinopril', DateTime(2026, 9, 22, 8),
+      await seedMed('m1', mine, 'Lisinopril', DateTime(2026, 9, 22, 8),
           takenAt: DateTime(2026, 9, 22, 8));
-      seedMed('m2', mine, 'Donepezil', DateTime(2026, 9, 22, 9));
+      await seedMed('m2', mine, 'Donepezil', DateTime(2026, 9, 22, 9));
       // Another recipient's earlier dose must never be the one we stamp.
-      seedMed('m3', other, 'Not mine', DateTime(2026, 9, 22, 7));
+      await seedMed('m3', other, 'Not mine', DateTime(2026, 9, 22, 7));
 
       final meds = await scopedMeds(mine);
       expect(meds, hasLength(2));
@@ -248,7 +262,7 @@ void main() {
     test('leaves the records alone when every dose is taken today', () async {
       final mine = recipient('mine');
       FFAppState().activeGroupId = 'org_test_1';
-      seedMed('m1', mine, 'Lisinopril', DateTime(2026, 9, 22, 8),
+      await seedMed('m1', mine, 'Lisinopril', DateTime(2026, 9, 22, 8),
           takenAt: DateTime(2026, 9, 22, 8));
 
       expect(nextPendingDose(await scopedMeds(mine), DateTime(2026, 9, 22, 10)),
@@ -258,7 +272,7 @@ void main() {
     test('a dose taken on a PREVIOUS day reads as pending again', () async {
       final mine = recipient('mine');
       FFAppState().activeGroupId = 'org_test_1';
-      seedMed('m1', mine, 'Lisinopril', DateTime(2026, 9, 21, 8),
+      await seedMed('m1', mine, 'Lisinopril', DateTime(2026, 9, 21, 8),
           takenAt: DateTime(2026, 9, 21, 8));
 
       final dose =
