@@ -21,6 +21,47 @@ import 'package:provider/provider.dart';
 import 'c_daily_dashboard_model.dart';
 export 'c_daily_dashboard_model.dart';
 
+/// Defensive deref for the Daily Dashboard's Morning Vitals document.
+///
+/// The dashboard is also reachable from the nav menu ('Daily Care') with no
+/// `careRecipients` param, and `FFAppState().selectedCareRecipient` is
+/// in-memory/per-user — it is null until a care-recipient card is tapped (a
+/// fresh session, or any session where nothing was selected yet). Building the
+/// stream with `selectedCareRecipient!` threw 'Null check operator used on a
+/// null value' while the page built (red screen); stream nothing instead and
+/// let the builder below render the section's empty state.
+@visibleForTesting
+Stream<CareRecipientsRecord>? selectedRecipientVitalsStream() {
+  final selected = FFAppState().selectedCareRecipient;
+  if (selected == null) {
+    return null;
+  }
+  return CareRecipientsRecord.getDocument(selected);
+}
+
+/// Parent-safe `carechecklist` stream for the dashboard's Care Checklist.
+///
+/// The checklist lives in a `carechecklist` SUBCOLLECTION of the selected care
+/// recipient, so the query needs that parent reference. On the nav-menu path
+/// ('Daily Care') the page is built without a `careRecipients` param, and
+/// `CarechecklistRecord.collection(null)` falls back to a
+/// `collectionGroup('carechecklist')` query — which the Firestore rules do not
+/// permit (no `{path=**}/carechecklist` rule), so the query is denied. With no
+/// parent reference there is nothing to read: stream an empty list (the
+/// section's empty state) instead of issuing a query that cannot succeed.
+@visibleForTesting
+Stream<List<CarechecklistRecord>> carechecklistForParent(
+    DocumentReference? parent) {
+  if (parent == null) {
+    return Stream<List<CarechecklistRecord>>.value(const []);
+  }
+  return queryCarechecklistRecord(
+    parent: parent,
+    queryBuilder: (carechecklistRecord) =>
+        carechecklistRecord.orderBy('created_time', descending: true),
+  );
+}
+
 class CDailyDashboardWidget extends StatefulWidget {
   const CDailyDashboardWidget({
     super.key,
@@ -438,9 +479,17 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                             ),
                             if (widget!.careRecipients?.trackVitals ?? true)
                               StreamBuilder<CareRecipientsRecord>(
-                                stream: CareRecipientsRecord.getDocument(
-                                    FFAppState().selectedCareRecipient!),
+                                stream: selectedRecipientVitalsStream(),
                                 builder: (context, snapshot) {
+                                  // No care recipient selected (first run, or
+                                  // the dashboard opened from the nav menu):
+                                  // there is no vitals document to stream, so
+                                  // render the section's empty state rather
+                                  // than a spinner that would never resolve.
+                                  if (FFAppState().selectedCareRecipient ==
+                                      null) {
+                                    return const SizedBox.shrink();
+                                  }
                                   // Customize what your widget looks like when it's loading.
                                   if (!snapshot.hasData) {
                                     return Center(
@@ -1898,13 +1947,16 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                           ],
                         ),
                         StreamBuilder<List<CarechecklistRecord>>(
-                          stream: queryCarechecklistRecord(
-                            parent: widget!.careRecipients?.reference,
-                            queryBuilder: (carechecklistRecord) =>
-                                carechecklistRecord.orderBy('created_time',
-                                    descending: true),
-                          ),
+                          stream: carechecklistForParent(
+                              widget!.careRecipients?.reference),
                           builder: (context, snapshot) {
+                            // A denied or failed query must not leave the
+                            // section spinning forever: fall through to the
+                            // same empty rendering a recipient with no
+                            // checklist entries shows.
+                            if (snapshot.hasError) {
+                              return const SizedBox.shrink();
+                            }
                             // Customize what your widget looks like when it's loading.
                             if (!snapshot.hasData) {
                               return Center(
