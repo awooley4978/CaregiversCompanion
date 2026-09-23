@@ -37,6 +37,15 @@ class _ConditionChipWidgetState extends State<ConditionChipWidget> {
     super.initState();
     _model = createModel(context, () => ConditionChipModel());
 
+    // The live selection lives on the model (seeded from the `selected`
+    // parameter the page passes in), so the page can read the chip's selection
+    // back at Save time — the same pattern the Tracking Modules use for their
+    // switches (SwitchComponentModel.switchValue).
+    _model.selectedValue = valueOrDefault<bool>(
+      widget!.selected,
+      true,
+    );
+
     WidgetsBinding.instance.addPostFrameCallback((_) => safeSetState(() {}));
   }
 
@@ -49,131 +58,143 @@ class _ConditionChipWidgetState extends State<ConditionChipWidget> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: valueOrDefault<Color>(
-          valueOrDefault<bool>(
-            widget!.selected,
-            true,
-          )
-              ? FlutterFlowTheme.of(context).primary
-              : FlutterFlowTheme.of(context).secondaryBackground,
-          FlutterFlowTheme.of(context).primary,
-        ),
-        borderRadius: BorderRadius.circular(28.0),
-        shape: BoxShape.rectangle,
-        border: Border.all(
+    return InkWell(
+      splashColor: Colors.transparent,
+      focusColor: Colors.transparent,
+      hoverColor: Colors.transparent,
+      highlightColor: Colors.transparent,
+      onTap: () async {
+        // Toggle this chip's selection (owner-approved 2026-09-23); the page
+        // reads `selectedValue` back when it saves the care profile.
+        safeSetState(() => _model.selectedValue =
+            !valueOrDefault<bool>(_model.selectedValue, true));
+      },
+      child: Container(
+        decoration: BoxDecoration(
           color: valueOrDefault<Color>(
             valueOrDefault<bool>(
-              widget!.selected,
+              _model.selectedValue,
               true,
             )
                 ? FlutterFlowTheme.of(context).primary
-                : FlutterFlowTheme.of(context).alternate,
+                : FlutterFlowTheme.of(context).secondaryBackground,
             FlutterFlowTheme.of(context).primary,
           ),
-          width: valueOrDefault<double>(
-            valueOrDefault<bool>(
-              widget!.selected,
-              true,
-            )
-                ? 1.0
-                : 1.0,
-            1.0,
+          borderRadius: BorderRadius.circular(28.0),
+          shape: BoxShape.rectangle,
+          border: Border.all(
+            color: valueOrDefault<Color>(
+              valueOrDefault<bool>(
+                _model.selectedValue,
+                true,
+              )
+                  ? FlutterFlowTheme.of(context).primary
+                  : FlutterFlowTheme.of(context).alternate,
+              FlutterFlowTheme.of(context).primary,
+            ),
+            width: valueOrDefault<double>(
+              valueOrDefault<bool>(
+                _model.selectedValue,
+                true,
+              )
+                  ? 1.0
+                  : 1.0,
+              1.0,
+            ),
           ),
         ),
-      ),
-      child: Padding(
-        padding: EdgeInsetsDirectional.fromSTEB(16.0, 8.0, 16.0, 8.0),
-        child: Container(
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.start,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Text(
-                valueOrDefault<String>(
-                  widget!.label,
-                  'Diabetes',
-                ),
-                style: FlutterFlowTheme.of(context).labelLarge.override(
-                      font: GoogleFonts.nunito(
+        child: Padding(
+          padding: EdgeInsetsDirectional.fromSTEB(16.0, 8.0, 16.0, 8.0),
+          child: Container(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Text(
+                  valueOrDefault<String>(
+                    widget!.label,
+                    'Diabetes',
+                  ),
+                  style: FlutterFlowTheme.of(context).labelLarge.override(
+                        font: GoogleFonts.nunito(
+                          fontWeight:
+                              FlutterFlowTheme.of(context).labelLarge.fontWeight,
+                          fontStyle:
+                              FlutterFlowTheme.of(context).labelLarge.fontStyle,
+                        ),
+                        color: valueOrDefault<Color>(
+                          valueOrDefault<bool>(
+                            _model.selectedValue,
+                            true,
+                          )
+                              ? FlutterFlowTheme.of(context).onPrimary
+                              : FlutterFlowTheme.of(context).primaryText,
+                          FlutterFlowTheme.of(context).onPrimary,
+                        ),
+                        letterSpacing: 0.0,
                         fontWeight:
                             FlutterFlowTheme.of(context).labelLarge.fontWeight,
                         fontStyle:
                             FlutterFlowTheme.of(context).labelLarge.fontStyle,
+                        lineHeight: 1.4,
                       ),
-                      color: valueOrDefault<Color>(
+                ),
+                Container(
+                  width: 16.0,
+                  height: 16.0,
+                  child: Stack(
+                    alignment: AlignmentDirectional(0.0, 0.0),
+                    children: [
+                      if (valueOrDefault<bool>(
                         valueOrDefault<bool>(
-                          widget!.selected,
+                          _model.selectedValue,
                           true,
                         )
-                            ? FlutterFlowTheme.of(context).onPrimary
-                            : FlutterFlowTheme.of(context).primaryText,
-                        FlutterFlowTheme.of(context).onPrimary,
-                      ),
-                      letterSpacing: 0.0,
-                      fontWeight:
-                          FlutterFlowTheme.of(context).labelLarge.fontWeight,
-                      fontStyle:
-                          FlutterFlowTheme.of(context).labelLarge.fontStyle,
-                      lineHeight: 1.4,
-                    ),
-              ),
-              Container(
-                width: 16.0,
-                height: 16.0,
-                child: Stack(
-                  alignment: AlignmentDirectional(0.0, 0.0),
-                  children: [
-                    if (valueOrDefault<bool>(
-                      valueOrDefault<bool>(
-                        widget!.selected,
+                            ? true
+                            : false,
                         true,
-                      )
-                          ? true
-                          : false,
-                      true,
-                    ))
-                      Icon(
-                        Icons.check_circle_rounded,
-                        color: valueOrDefault<Color>(
-                          valueOrDefault<bool>(
-                            widget!.selected,
-                            true,
-                          )
-                              ? FlutterFlowTheme.of(context).onPrimary
-                              : FlutterFlowTheme.of(context).secondaryText,
-                          FlutterFlowTheme.of(context).onPrimary,
+                      ))
+                        Icon(
+                          Icons.check_circle_rounded,
+                          color: valueOrDefault<Color>(
+                            valueOrDefault<bool>(
+                              _model.selectedValue,
+                              true,
+                            )
+                                ? FlutterFlowTheme.of(context).onPrimary
+                                : FlutterFlowTheme.of(context).secondaryText,
+                            FlutterFlowTheme.of(context).onPrimary,
+                          ),
+                          size: 16.0,
                         ),
-                        size: 16.0,
-                      ),
-                    if (valueOrDefault<bool>(
-                      valueOrDefault<bool>(
-                        widget!.selected,
-                        true,
-                      )
-                          ? false
-                          : true,
-                      false,
-                    ))
-                      Icon(
-                        Icons.add_circle_outline_rounded,
-                        color: valueOrDefault<Color>(
-                          valueOrDefault<bool>(
-                            widget!.selected,
-                            true,
-                          )
-                              ? FlutterFlowTheme.of(context).onPrimary
-                              : FlutterFlowTheme.of(context).secondaryText,
-                          FlutterFlowTheme.of(context).onPrimary,
+                      if (valueOrDefault<bool>(
+                        valueOrDefault<bool>(
+                          _model.selectedValue,
+                          true,
+                        )
+                            ? false
+                            : true,
+                        false,
+                      ))
+                        Icon(
+                          Icons.add_circle_outline_rounded,
+                          color: valueOrDefault<Color>(
+                            valueOrDefault<bool>(
+                              _model.selectedValue,
+                              true,
+                            )
+                                ? FlutterFlowTheme.of(context).onPrimary
+                                : FlutterFlowTheme.of(context).secondaryText,
+                            FlutterFlowTheme.of(context).onPrimary,
+                          ),
+                          size: 16.0,
                         ),
-                        size: 16.0,
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            ].divide(SizedBox(width: 4.0)),
+              ].divide(SizedBox(width: 4.0)),
+            ),
           ),
         ),
       ),

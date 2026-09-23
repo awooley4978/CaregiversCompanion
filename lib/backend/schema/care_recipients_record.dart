@@ -192,6 +192,7 @@ class CareRecipientsRecord extends FirestoreRecord {
 
 Map<String, dynamic> createCareRecipientsRecordData({
   String? name,
+  List<String>? conditions,
   String? photo,
   DateTime? createdAt,
   DateTime? updatedAt,
@@ -214,6 +215,7 @@ Map<String, dynamic> createCareRecipientsRecordData({
   final firestoreData = mapToFirestore(
     <String, dynamic>{
       'Name': name,
+      'Conditions': conditions,
       'Photo': photo,
       'CreatedAt': createdAt,
       'UpdatedAt': updatedAt,
