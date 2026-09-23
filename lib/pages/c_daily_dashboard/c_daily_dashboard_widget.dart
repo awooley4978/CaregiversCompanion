@@ -1083,7 +1083,7 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                                       ),
                                                     ].divide(
                                                         SizedBox(height: 2.0)),
-                                                  ),
+                                                  );
                                                     },
                                                   ),
                                                 ),
