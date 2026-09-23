@@ -75,7 +75,8 @@ async function seed(ctx) {
   await set('careNotes/note1',     { careRecipientRef: F1ref,    text: 'hello' });
   await set('careNotes/note_other',{ careRecipientRef: OTHERref, text: 'x' });
   await set('careNotes/note_prof', { careRecipientRef: PROFref,  text: 'y' });
-  await set('mealEntries/meal1',   { patientRef: F1ref });
+  await set('mealEntries/meal1',   { patientRef: F1ref,    mealName: 'Soup', orgId: ORG_FAM });
+  await set('mealEntries/meal_other', { patientRef: OTHERref, mealName: 'X', orgId: ORG_OTHER });
   await set('symptomEntries/sym1', { patientRef: F1ref });
   // medications — ref-linked via careRecipientRef (enabled for the tracker).
   // Each carries its owner org's orgId (written from the app's active group on
@@ -275,6 +276,83 @@ describe('MEDICATIONS (ref-linked via careRecipientRef — newly enabled)', () =
 });
 
 // ---------------------------------------------------------------------------
+// MEALENTRIES (ref-linked via patientRef — read split 2026-09-23).
+// The Daily Dashboard's 'Meals and Hydration' card now lists the resolved
+// recipient's meals with a LIVE LIST query
+// (`queryMealEntriesRecord`: where orgId == active group AND patientRef ==
+// recipient) — the same shape as the medications tracker query, and for the same
+// reason: Firestore evaluates LIST rules WITHOUT loading candidate documents, so
+// the rule can only gate on a stored field the QUERY constrains (orgId via the
+// exists()-only canListRecipientsInOrg check). These cases pin that query
+// verbatim; a get()-based `read` rule denies it live, which would leave a
+// confirmed "Meal saved." invisible on the card.
+// ---------------------------------------------------------------------------
+describe('MEALENTRIES (ref-linked via patientRef — read split)', () => {
+  it('owner of recipient org can GET a meal doc (full gate kept)', async () => {
+    await assertSucceeds(dbFor(OWNER).doc('mealEntries/meal1').get());
+  });
+  it('owner dashboard LIST (orgId + patientRef) is ALLOWED', async () => {
+    const q = dbFor(OWNER)
+      .collection('mealEntries')
+      .where('orgId', '==', ORG_FAM)
+      .where('patientRef', '==', F1ref);
+    await assertSucceeds(q.get());
+  });
+  it('owner LIST sees only their own org\'s meals', async () => {
+    const snap = await assertSucceeds(dbFor(OWNER)
+      .collection('mealEntries')
+      .where('orgId', '==', ORG_FAM)
+      .where('patientRef', '==', F1ref)
+      .get());
+    const ids = snap.docs.map((d) => d.id);
+    if (ids.includes('meal_other')) {
+      throw new Error('cross-org leak in mealEntries LIST: ' + ids.join(','));
+    }
+  });
+  it('stranger (other-org member) LIST against the family org is DENIED', async () => {
+    await assertFails(dbFor(STRANGER)
+      .collection('mealEntries')
+      .where('orgId', '==', ORG_FAM)
+      .where('patientRef', '==', F1ref)
+      .get());
+  });
+  it('stranger LIST in their OWN org returns no family meal (no cross-org leak)', async () => {
+    const snap = await assertSucceeds(dbFor(STRANGER)
+      .collection('mealEntries')
+      .where('orgId', '==', ORG_OTHER)
+      .where('patientRef', '==', OTHERref)
+      .get());
+    const ids = snap.docs.map((d) => d.id);
+    if (ids.includes('meal1')) {
+      throw new Error('cross-org leak in mealEntries LIST: ' + ids.join(','));
+    }
+  });
+  it('stranger single GET of a family meal stays DENIED', async () => {
+    await assertFails(dbFor(STRANGER).doc('mealEntries/meal1').get());
+  });
+  it('family caregiver LIST (orgId + patientRef) is ALLOWED', async () => {
+    await assertSucceeds(dbFor(CAREGIVER)
+      .collection('mealEntries')
+      .where('orgId', '==', ORG_FAM)
+      .where('patientRef', '==', F1ref)
+      .get());
+  });
+  // Deliberate limitation inherited from the careRecipients/medications
+  // get-vs-list split: LIST is MEMBERSHIP-based, so a grantee still GETs a meal
+  // through their share but cannot LIST over the sharing org.
+  it('grantee LIST over the sharing org is DENIED (list path is membership-based)', async () => {
+    await assertFails(dbFor(GRANTEE)
+      .collection('mealEntries')
+      .where('orgId', '==', ORG_FAM)
+      .where('patientRef', '==', F1ref)
+      .get());
+  });
+  it('grantee single GET of the shared meal still SUCCEEDS (share path intact)', async () => {
+    await assertSucceeds(dbFor(GRANTEE).doc('mealEntries/meal1').get());
+  });
+});
+
+// ---------------------------------------------------------------------------
 // FAMILY CAREGIVER (non-owner member of the recipient's family org) — the
 // task's required "caregiver within org" ALLOWED case. D6: family org -> any
 // active member with role owner/admin/caregiver/viewer may READ; writes need
@@ -294,7 +372,7 @@ describe('FAMILY CAREGIVER within recipient org (non-owner)', () => {
   it('can write ref-linked data for their own family org (charting loop)', async () => {
     const db = dbFor(CAREGIVER);
     await assertSucceeds(db.doc('careNotes/cg_note').set({ careRecipientRef: F1ref, text: 'by caregiver' }));
-    await assertSucceeds(db.doc('mealEntries/cg_meal').set({ patientRef: F1ref }));
+    await assertSucceeds(db.doc('mealEntries/cg_meal').set({ patientRef: F1ref, orgId: ORG_FAM }));
     await assertSucceeds(db.doc('symptomEntries/cg_sym').set({ patientRef: F1ref }));
     await assertSucceeds(db.doc('medications/cg_med').set({ careRecipientRef: F1ref, medicationName: 'Y', taken: false, orgId: ORG_FAM }));
     await assertSucceeds(db.doc('medications/med1').update({ taken: true, status: 'TAKEN' }));
@@ -342,8 +420,18 @@ describe('DEAD COLLECTIONS stay denied (V1 consolidated decision)', () => {
 // ---------------------------------------------------------------------------
 describe('Real app write/delete paths (owner) + stranger denial', () => {
   it('mealEntries create (Add Meal sheet) ALLOWED for owner, DENIED for stranger', async () => {
-    await assertSucceeds(dbFor(OWNER).doc('mealEntries/meal_new').set({ patientRef: F1ref, mealName: 'Soup' }));
-    await assertFails(dbFor(STRANGER).doc('mealEntries/meal_mal').set({ patientRef: F1ref }));
+    // The doc must carry the caller's orgId: the mealEntries LIST rule (read
+    // split, 2026-09-23) gates on the STORED orgId, so a doc without one is
+    // rejected at create rather than poisoning the dashboard's meal query.
+    await assertSucceeds(dbFor(OWNER).doc('mealEntries/meal_new').set({
+      patientRef: F1ref, mealName: 'Soup', orgId: ORG_FAM,
+    }));
+    await assertFails(dbFor(OWNER).doc('mealEntries/meal_noorg').set({
+      patientRef: F1ref, mealName: 'Soup',
+    }));
+    await assertFails(dbFor(STRANGER).doc('mealEntries/meal_mal').set({
+      patientRef: F1ref, mealName: 'Soup', orgId: ORG_FAM,
+    }));
   });
   it('symptomEntries create (dashboard "Add Entry") ALLOWED for owner, DENIED for stranger', async () => {
     await assertSucceeds(dbFor(OWNER).doc('symptomEntries/sym_new').set({ patientRef: F1ref, symptom: 'Pain' }));
