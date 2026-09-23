@@ -12,6 +12,7 @@ import '/flutter_flow/flutter_flow_icon_button.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/flutter_flow_widgets.dart';
+import '/pages/d_medication_tracker/d_medication_tracker_widget.dart';
 import 'dart:ui';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -39,27 +40,112 @@ Stream<CareRecipientsRecord>? selectedRecipientVitalsStream() {
   return CareRecipientsRecord.getDocument(selected);
 }
 
+/// The care recipient every Dashboard read and write is scoped to.
+///
+/// The page has two entry points: pushed WITH the route param (a client
+/// directory card tap / post-Save-Profile navigation — PR #23) and from the nav
+/// menu's 'Daily Care' entry, which pushes it with NO param. On the second path
+/// the working recipient is whatever the signed-in caregiver has selected
+/// (`FFAppState().selectedCareRecipient`, per-user and persisted). When neither
+/// exists there is no recipient to address, and the callers keep the PR #29
+/// behaviour: an empty state, never a crash and never a forever spinner.
+@visibleForTesting
+DocumentReference? dashboardRecipientRef(CareRecipientsRecord? passed) =>
+    passed?.reference ?? FFAppState().selectedCareRecipient;
+
+/// Newest-first ordering for the Care Checklist, applied in Dart.
+///
+/// The recipient-scoped query must NOT `orderBy('created_time')`: Firestore
+/// silently DROPS every document missing the ordered field, so a checklist
+/// written by any path that did not stamp `created_time` reads to the caregiver
+/// as "the checklist is empty". Ordering the records the query did return keeps
+/// the newest-first design AND every record.
+int carechecklistNewestFirst(CarechecklistRecord a, CarechecklistRecord b) {
+  final ta = a.createdTime;
+  final tb = b.createdTime;
+  if (ta == null && tb == null) {
+    return 0;
+  }
+  if (ta == null) {
+    return 1;
+  }
+  if (tb == null) {
+    return -1;
+  }
+  return tb.compareTo(ta);
+}
+
 /// Parent-safe `carechecklist` stream for the dashboard's Care Checklist.
 ///
-/// The checklist lives in a `carechecklist` SUBCOLLECTION of the selected care
+/// The checklist lives in a `carechecklist` SUBCOLLECTION of the care
 /// recipient, so the query needs that parent reference. On the nav-menu path
 /// ('Daily Care') the page is built without a `careRecipients` param, and
 /// `CarechecklistRecord.collection(null)` falls back to a
 /// `collectionGroup('carechecklist')` query — which the Firestore rules do not
 /// permit (no `{path=**}/carechecklist` rule), so the query is denied. With no
 /// parent reference there is nothing to read: stream an empty list (the
-/// section's empty state) instead of issuing a query that cannot succeed.
+/// section's empty state) instead of issuing a query that cannot succeed. With
+/// one (the resolved recipient), read that recipient's real checklist.
 @visibleForTesting
 Stream<List<CarechecklistRecord>> carechecklistForParent(
     DocumentReference? parent) {
   if (parent == null) {
     return Stream<List<CarechecklistRecord>>.value(const []);
   }
-  return queryCarechecklistRecord(
-    parent: parent,
-    queryBuilder: (carechecklistRecord) =>
-        carechecklistRecord.orderBy('created_time', descending: true),
+  return queryCarechecklistRecord(parent: parent).map(
+    (records) => [...records]..sort(carechecklistNewestFirst),
   );
+}
+
+/// Newest-first ordering for the symptom list, applied in Dart.
+///
+/// Same reason as [carechecklistNewestFirst]: `orderBy('timeLogged')` drops
+/// every entry that has no logged time (legacy/imported rows), which is one way
+/// the section can query "successfully" and still never show anything.
+int symptomEntriesNewestFirst(SymptomEntriesRecord a, SymptomEntriesRecord b) {
+  final ta = a.timeLogged;
+  final tb = b.timeLogged;
+  if (ta == null && tb == null) {
+    return 0;
+  }
+  if (ta == null) {
+    return 1;
+  }
+  if (tb == null) {
+    return -1;
+  }
+  return tb.compareTo(ta);
+}
+
+/// The dose the Dashboard's 'Taken' button marks next: the earliest scheduled
+/// medication that is not already taken TODAY.
+///
+/// "Taken today" is [isTakenForDay] — the exact day-rollover rule the
+/// Medication Tracker renders with (PR #22), so both pages agree on what
+/// "taken" means. Returns null when every dose is already taken for today (the
+/// caller then leaves the records alone instead of re-stamping a timestamp).
+@visibleForTesting
+MedicationsRecord? nextPendingDose(List<MedicationsRecord> meds, DateTime now) {
+  final sorted = [...meds]..sort((a, b) {
+      final ta = a.scheduledTime;
+      final tb = b.scheduledTime;
+      if (ta == null && tb == null) {
+        return 0;
+      }
+      if (ta == null) {
+        return 1;
+      }
+      if (tb == null) {
+        return -1;
+      }
+      return ta.compareTo(tb);
+    });
+  for (final med in sorted) {
+    if (!isTakenForDay(med.takenAt, now)) {
+      return med;
+    }
+  }
+  return null;
 }
 
 class CDailyDashboardWidget extends StatefulWidget {
@@ -89,6 +175,15 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
 
     // On page load action.
     SchedulerBinding.instance.addPostFrameCallback((_) async {
+      // Normalise the working recipient: when the page was pushed WITH the
+      // route param, make the app-wide selection match it, so the child sheets
+      // and cards below (Add Meal, the checklist card, the notes form) target
+      // the same recipient this dashboard is showing.
+      final passedRef = widget.careRecipients?.reference;
+      if (passedRef != null &&
+          FFAppState().selectedCareRecipient != passedRef) {
+        FFAppState().selectedCareRecipient = passedRef;
+      }
       _model.selectedDate = getCurrentTimestamp;
       safeSetState(() {});
     });
@@ -101,6 +196,78 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
     _model.dispose();
 
     super.dispose();
+  }
+
+  /// The working care recipient for this dashboard: the route param when the
+  /// page was pushed with one, else the app-wide selection.
+  DocumentReference? get _recipientRef =>
+      dashboardRecipientRef(widget.careRecipients);
+
+  /// Marks the resolved recipient's next pending dose as taken — the same
+  /// `medications` write the Medication Tracker's check-circle performs (PR #22
+  /// `medicationTakenUpdate`), so the Dashboard's 'Taken' button and the
+  /// tracker agree on the record shape (taken / status / takenAt).
+  ///
+  /// The lookup reuses the tracker's list query verbatim: `orgId` == the
+  /// caller's active group AND `careRecipientRef` == the resolved recipient —
+  /// the field set the Phase-4 `medications` LIST rule gates on, so this is a
+  /// scoped read, never an unscoped one.
+  Future<void> _markTaken(BuildContext context) async {
+    final recipientRef = _recipientRef;
+    final orgId = FFAppState().activeGroupId ?? '';
+    if (recipientRef == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Select a care recipient to update medications.'),
+        ),
+      );
+      return;
+    }
+    if (orgId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No active care circle for this account yet.'),
+        ),
+      );
+      return;
+    }
+    try {
+      final meds = await queryMedicationsRecordOnce(
+        queryBuilder: (q) => q
+            .where('orgId', isEqualTo: orgId)
+            .where('careRecipientRef', isEqualTo: recipientRef),
+      );
+      final dose = nextPendingDose(meds, DateTime.now());
+      if (dose == null) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No pending dose to mark as taken.'),
+            ),
+          );
+        }
+        return;
+      }
+      await dose.reference.update(medicationTakenUpdate(taken: true));
+      if (context.mounted) {
+        final name = dose.medicationName.trim();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+                '${name.isEmpty ? 'Dose' : name} marked as taken.'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content:
+                Text('Could not update this medication. Please try again.'),
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -765,19 +932,32 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                                         SizedBox(height: 2.0)),
                                                   ),
                                                 ),
-                                                wrapWithModel(
-                                                  model: _model.buttonModel1,
-                                                  updateCallback: () =>
-                                                      safeSetState(() {}),
-                                                  child: ButtonWidget(
-                                                    iconPresent: false,
-                                                    iconEndPresent: false,
-                                                    content: 'Taken',
-                                                    variant: 'primary',
-                                                    size: 'small',
-                                                    fullWidth: false,
-                                                    loading: false,
-                                                    disabled: false,
+                                                InkWell(
+                                                  splashColor:
+                                                      Colors.transparent,
+                                                  focusColor:
+                                                      Colors.transparent,
+                                                  hoverColor:
+                                                      Colors.transparent,
+                                                  highlightColor:
+                                                      Colors.transparent,
+                                                  onTap: () async {
+                                                    await _markTaken(context);
+                                                  },
+                                                  child: wrapWithModel(
+                                                    model: _model.buttonModel1,
+                                                    updateCallback: () =>
+                                                        safeSetState(() {}),
+                                                    child: ButtonWidget(
+                                                      iconPresent: false,
+                                                      iconEndPresent: false,
+                                                      content: 'Taken',
+                                                      variant: 'primary',
+                                                      size: 'small',
+                                                      fullWidth: false,
+                                                      loading: false,
+                                                      disabled: false,
+                                                    ),
                                                   ),
                                                 ),
                                               ].divide(SizedBox(width: 16.0)),
@@ -799,14 +979,20 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                       ),
                                     ),
                                     StreamBuilder<List<SymptomEntriesRecord>>(
-                                      stream: symptomEntriesForSelectedRecipient(
-                                        queryBuilder:
-                                            (symptomEntriesRecord) =>
-                                                symptomEntriesRecord.orderBy(
-                                                    'timeLogged',
-                                                    descending: true),
-                                      ),
+                                      // Scoped to the RESOLVED recipient: the
+                                      // route param when this page was pushed
+                                      // with one, else the app-wide selection.
+                                      // Reading the selection directly is how
+                                      // the section stayed empty on the
+                                      // nav-menu 'Daily Care' path.
+                                      stream: symptomEntriesForRecipient(
+                                          recipientRef: _recipientRef),
                                       builder: (context, snapshot) {
+                                        // A denied query must not leave the
+                                        // section spinning forever.
+                                        if (snapshot.hasError) {
+                                          return const SizedBox.shrink();
+                                        }
                                         // Customize what your widget looks like when it's loading.
                                         if (!snapshot.hasData) {
                                           return Center(
@@ -824,9 +1010,14 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                             ),
                                           );
                                         }
-                                        List<SymptomEntriesRecord>
-                                            listViewSymptomEntriesRecordList =
-                                            snapshot.data!;
+                                        // Newest-first in Dart, not via
+                                        // orderBy: that would drop every entry
+                                        // with no logged time.
+                                        final listViewSymptomEntriesRecordList =
+                                            <SymptomEntriesRecord>[
+                                              ...snapshot.data!
+                                            ]..sort(
+                                                symptomEntriesNewestFirst);
 
                                         return ListView.builder(
                                           padding: EdgeInsets.zero,
@@ -1172,7 +1363,10 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                                                     .viewInsetsOf(
                                                                         context),
                                                                 child:
-                                                                    AddMealWidget(),
+                                                                    AddMealWidget(
+                                                                      patientRef:
+                                                                          _recipientRef,
+                                                                    ),
                                                               ),
                                                             );
                                                           },
@@ -1282,7 +1476,10 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                                               .viewInsetsOf(
                                                                   context),
                                                           child:
-                                                              AddMealWidget(),
+                                                              AddMealWidget(
+                                                                patientRef:
+                                                                    _recipientRef,
+                                                              ),
                                                         ),
                                                       );
                                                     },
@@ -1898,7 +2095,20 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                             child: Padding(
                                               padding: MediaQuery.viewInsetsOf(
                                                   context),
-                                              child: DashboardTaskCardWidget(),
+                                              // The card dereferences its
+                                              // icon (`widget!.icon!`), so the
+                                              // modal must pass one — the same
+                                              // icon the checklist rows use.
+                                              child: DashboardTaskCardWidget(
+                                                icon: Icon(
+                                                  Icons
+                                                      .accessibility_new_rounded,
+                                                  color: FlutterFlowTheme.of(
+                                                          context)
+                                                      .secondaryText,
+                                                  size: 20.0,
+                                                ),
+                                              ),
                                             ),
                                           );
                                         },
@@ -1947,8 +2157,10 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                           ],
                         ),
                         StreamBuilder<List<CarechecklistRecord>>(
-                          stream: carechecklistForParent(
-                              widget!.careRecipients?.reference),
+                          // Resolved recipient (route param or app-wide
+                          // selection) — on the nav-menu path the param is
+                          // null, which is why this section rendered nothing.
+                          stream: carechecklistForParent(_recipientRef),
                           builder: (context, snapshot) {
                             // A denied or failed query must not leave the
                             // section spinning forever: fall through to the
@@ -2063,12 +2275,12 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                             child: Padding(
                                               padding: MediaQuery.viewInsetsOf(
                                                   context),
+                                              // The compose sheet writes
+                                              // into `careNotes` ref-linked
+                                              // to the resolved recipient.
                                               child: DashboardNotesFormWidget(
                                                 authorBg: Color(0x00000000),
-                                                authorInitials: '',
-                                                authorName: '',
-                                                content: '',
-                                                time: '',
+                                                careRecipientRef: _recipientRef,
                                                 isPrivate: false,
                                               ),
                                             ),

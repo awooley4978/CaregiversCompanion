@@ -376,14 +376,38 @@ Stream<List<CareRecipientsRecord>> careRecipientsForActiveGroup({
 Stream<List<SymptomEntriesRecord>> symptomEntriesForSelectedRecipient({
   Query Function(Query)? queryBuilder,
   int limit = -1,
+}) =>
+    symptomEntriesForRecipient(
+      recipientRef: FFAppState().selectedCareRecipient,
+      queryBuilder: queryBuilder,
+      limit: limit,
+    );
+
+/// Recipient-scoped symptomEntries stream for an EXPLICIT recipient reference.
+///
+/// Same scoping contract as [symptomEntriesForSelectedRecipient] (child data
+/// carries `patientRef`; Phase-4 rules derive access from the recipient's
+/// orgId) but the caller decides which recipient, instead of the function
+/// reading the app-wide selection. The dashboard's actions run on BOTH the
+/// route-param path (a directory card tap pushes the page with the recipient)
+/// and the nav-menu path (no param, the app-wide selection is the working
+/// recipient), so it resolves the recipient once and passes it in — a stream
+/// that silently reads a *stale or null* selection is how the section ends up
+/// permanently empty.
+///
+/// A null reference streams an empty list: the data layer must never build
+/// `where('patientRef', isEqualTo: null)`.
+Stream<List<SymptomEntriesRecord>> symptomEntriesForRecipient({
+  required DocumentReference? recipientRef,
+  Query Function(Query)? queryBuilder,
+  int limit = -1,
 }) {
-  final selected = FFAppState().selectedCareRecipient;
-  if (selected == null) {
+  if (recipientRef == null) {
     return Stream.value(const []);
   }
   return querySymptomEntriesRecord(
     queryBuilder: (q) {
-      final scoped = q.where('patientRef', isEqualTo: selected);
+      final scoped = q.where('patientRef', isEqualTo: recipientRef);
       return queryBuilder == null ? scoped : queryBuilder(scoped);
     },
     limit: limit,
