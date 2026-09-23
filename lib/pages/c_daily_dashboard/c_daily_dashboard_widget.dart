@@ -282,6 +282,35 @@ String mealEntrySubtitle(MealEntriesRecord meal) {
   return parts.join(' • ');
 }
 
+/// Opens the Add Meal sheet for [recipientRef] — the ONE code path every
+/// 'Add Meal' affordance on the Daily Dashboard uses: the meal card's tap, the
+/// section's 'Add Meal' button, and now the 'Meals and Hydration' section
+/// header's action (owner round-5 finding #3: the header's button had no
+/// handler at all). Extracted rather than copied so the three cannot drift.
+@visibleForTesting
+Future<void> openAddMealSheet(
+  BuildContext context,
+  DocumentReference? recipientRef,
+) {
+  return showModalBottomSheet(
+    isScrollControlled: true,
+    backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
+    enableDrag: false,
+    context: context,
+    builder: (context) {
+      return GestureDetector(
+        onTap: () {
+          FocusScope.of(context).unfocus();
+          FocusManager.instance.primaryFocus?.unfocus();
+        },
+        child: Padding(
+          padding: MediaQuery.viewInsetsOf(context),
+          child: AddMealWidget(patientRef: recipientRef),
+        ),
+      );
+    },
+  );
+}
 class CDailyDashboardWidget extends StatefulWidget {
   const CDailyDashboardWidget({
     super.key,
@@ -404,6 +433,13 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
     }
   }
 
+  /// The Dashboard's 'Add Meal' entry point: the sheet in [openAddMealSheet],
+  /// then a rebuild so the live meals card picks the new entry up (the sheet
+  /// itself pops on a successful save).
+  Future<void> _openAddMealSheet(BuildContext context) async {
+    await openAddMealSheet(context, _recipientRef);
+    safeSetState(() {});
+  }
   @override
   Widget build(BuildContext context) {
     context.watch<FFAppState>();
@@ -773,8 +809,10 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                             wrapWithModel(
                               model: _model.sectionHeaderModel1,
                               updateCallback: () => safeSetState(() {}),
+                              // No action: this section has no create flow
+                              // yet, so the header renders no button rather
+                              // than a dead 'Log New'.
                               child: SectionHeaderWidget(
-                                action: 'Log New',
                                 title: 'Morning Vitals',
                               ),
                             ),
@@ -924,6 +962,10 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                               child: SectionHeaderWidget(
                                 action: 'View Schedule',
                                 title: 'Medications',
+                                // Same destination as the nav menu's
+                                // 'Medication Tracker' entry.
+                                onAction: () => context.pushNamed(
+                                    DMedicationTrackerWidget.routeName),
                               ),
                             ),
                             Padding(
@@ -1127,8 +1169,12 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                         model: _model.sectionHeaderModel3,
                                         updateCallback: () =>
                                             safeSetState(() {}),
+                                        // No action: logging a symptom
+                                        // entry is an owner-decision item, so
+                                        // the header shows no button (the ''
+                                        // label used to render as a dead
+                                        // 'Log New').
                                         child: SectionHeaderWidget(
-                                          action: '',
                                           title: 'Symptoms',
                                         ),
                                       ),
@@ -1422,8 +1468,13 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                         updateCallback: () =>
                                             safeSetState(() {}),
                                         child: SectionHeaderWidget(
-                                          action: '',
+                                          action: 'Add Meal',
                                           title: 'Meals and Hydration',
+                                          // Same sheet as the meal card tap
+                                          // and the section's 'Add Meal'
+                                          // button.
+                                          onAction: () =>
+                                              _openAddMealSheet(context),
                                         ),
                                       ),
                                     ),
@@ -1492,43 +1543,7 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                                           Colors.transparent,
                                                       highlightColor:
                                                           Colors.transparent,
-                                                      onTap: () async {
-                                                        await showModalBottomSheet(
-                                                          isScrollControlled:
-                                                              true,
-                                                          backgroundColor:
-                                                              FlutterFlowTheme.of(
-                                                                      context)
-                                                                  .primaryBackground,
-                                                          enableDrag: false,
-                                                          context: context,
-                                                          builder: (context) {
-                                                            return GestureDetector(
-                                                              onTap: () {
-                                                                FocusScope.of(
-                                                                        context)
-                                                                    .unfocus();
-                                                                FocusManager
-                                                                    .instance
-                                                                    .primaryFocus
-                                                                    ?.unfocus();
-                                                              },
-                                                              child: Padding(
-                                                                padding: MediaQuery
-                                                                    .viewInsetsOf(
-                                                                        context),
-                                                                child:
-                                                                    AddMealWidget(
-                                                                      patientRef:
-                                                                          _recipientRef,
-                                                                    ),
-                                                              ),
-                                                            );
-                                                          },
-                                                        ).then((value) =>
-                                                            safeSetState(
-                                                                () {}));
-                                                      },
+                                                      onTap: () => _openAddMealSheet(context),
                                                         child: StreamBuilder<List<MealEntriesRecord>>(
                                                           // This card used to show hardcoded demo copy (a saved meal
                                                           // was invisible everywhere in the app). It now reads the
@@ -1606,39 +1621,7 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                                 hoverColor: Colors.transparent,
                                                 highlightColor:
                                                     Colors.transparent,
-                                                onTap: () async {
-                                                  await showModalBottomSheet(
-                                                    isScrollControlled: true,
-                                                    backgroundColor:
-                                                        FlutterFlowTheme.of(
-                                                                context)
-                                                            .primaryBackground,
-                                                    enableDrag: false,
-                                                    context: context,
-                                                    builder: (context) {
-                                                      return GestureDetector(
-                                                        onTap: () {
-                                                          FocusScope.of(context)
-                                                              .unfocus();
-                                                          FocusManager.instance
-                                                              .primaryFocus
-                                                              ?.unfocus();
-                                                        },
-                                                        child: Padding(
-                                                          padding: MediaQuery
-                                                              .viewInsetsOf(
-                                                                  context),
-                                                          child:
-                                                              AddMealWidget(
-                                                                patientRef:
-                                                                    _recipientRef,
-                                                              ),
-                                                        ),
-                                                      );
-                                                    },
-                                                  ).then((value) =>
-                                                      safeSetState(() {}));
-                                                },
+                                                onTap: () => _openAddMealSheet(context),
                                                 child: wrapWithModel(
                                                   model: _model.buttonModel3,
                                                   updateCallback: () =>
