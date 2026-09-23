@@ -10,6 +10,12 @@ import 'package:provider/provider.dart';
 import 'patent_picker_sheet_model.dart';
 export 'patent_picker_sheet_model.dart';
 
+/// The placeholder avatar the exported picker shows for every row (each care
+/// recipient has no photo wired to this sheet). Named so widget tests can seed
+/// the image cache with it and keep the harness off the network.
+const recipientPickerAvatarUrl =
+    'https://images.unsplash.com/photo-1633332755192-727a05c4013d?ixlib=rb-4.0.3&ixid=MnwxMjA3fDB8MHxzZWFyY2h8M3x8dXNlcnN8ZW58MHx8MHx8&auto=format&fit=crop&w=900&q=60';
+
 class PatentPickerSheetWidget extends StatefulWidget {
   const PatentPickerSheetWidget({super.key});
 
@@ -116,85 +122,104 @@ class _PatentPickerSheetWidgetState extends State<PatentPickerSheetWidget> {
                     itemBuilder: (context, listViewIndex) {
                       final listViewCareRecipientsRecord =
                           listViewCareRecipientsRecordList[listViewIndex];
-                      return MouseRegion(
-                        opaque: false,
-                        cursor: MouseCursor.defer ?? MouseCursor.defer,
-                        child: AnimatedContainer(
-                          duration: Duration(milliseconds: 150),
-                          curve: Curves.easeInOut,
-                          width: double.infinity,
-                          decoration: BoxDecoration(
-                            color: listViewIndex == _hoveredRecipientIndex
-                                ? FlutterFlowTheme.of(context).primaryBackground
-                                : FlutterFlowTheme.of(context)
-                                    .secondaryBackground,
-                          ),
-                          child: Padding(
-                            padding: EdgeInsetsDirectional.fromSTEB(
-                                12.0, 8.0, 12.0, 8.0),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.max,
-                              children: [
-                                Padding(
-                                  padding: EdgeInsetsDirectional.fromSTEB(
-                                      0.0, 0.0, 8.0, 0.0),
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(40.0),
-                                    child: Image.network(
-                                      'https://images.unsplash.com/photo-1633332755192-727a05c4013d?ixlib=rb-4.0.3&ixid=MnwxMjA3fDB8MHxzZWFyY2h8M3x8dXNlcnN8ZW58MHx8MHx8&auto=format&fit=crop&w=900&q=60',
-                                      width: 32.0,
-                                      height: 32.0,
-                                      fit: BoxFit.cover,
+                      // Owner round-5 symptom 5: the rows only highlighted
+                      // on hover — there was no InkWell/onTap anywhere in this
+                      // sheet, so tapping a profile did nothing and the scrim
+                      // was the only way out ("stuck in that menu").
+                      return InkWell(
+                        splashColor: Colors.transparent,
+                        focusColor: Colors.transparent,
+                        hoverColor: Colors.transparent,
+                        highlightColor: Colors.transparent,
+                        onTap: () {
+                          // The switch the client-directory card performs, plus
+                          // a pop carrying the chosen reference so the opener
+                          // can switch in place.
+                          final selected =
+                              listViewCareRecipientsRecord.reference;
+                          FFAppState().selectedCareRecipient = selected;
+                          Navigator.pop(context, selected);
+                        },
+                        child: MouseRegion(
+                          opaque: false,
+                          cursor: MouseCursor.defer ?? MouseCursor.defer,
+                          child: AnimatedContainer(
+                            duration: Duration(milliseconds: 150),
+                            curve: Curves.easeInOut,
+                            width: double.infinity,
+                            decoration: BoxDecoration(
+                              color: listViewIndex == _hoveredRecipientIndex
+                                  ? FlutterFlowTheme.of(context).primaryBackground
+                                  : FlutterFlowTheme.of(context)
+                                      .secondaryBackground,
+                            ),
+                            child: Padding(
+                              padding: EdgeInsetsDirectional.fromSTEB(
+                                  12.0, 8.0, 12.0, 8.0),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.max,
+                                children: [
+                                  Padding(
+                                    padding: EdgeInsetsDirectional.fromSTEB(
+                                        0.0, 0.0, 8.0, 0.0),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(40.0),
+                                      child: Image.network(
+                                        recipientPickerAvatarUrl,
+                                        width: 32.0,
+                                        height: 32.0,
+                                        fit: BoxFit.cover,
+                                      ),
                                     ),
                                   ),
-                                ),
-                                Padding(
-                                  padding: EdgeInsetsDirectional.fromSTEB(
-                                      4.0, 0.0, 0.0, 0.0),
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.max,
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        listViewCareRecipientsRecord.name,
-                                        style: FlutterFlowTheme.of(context)
-                                            .bodyMedium
-                                            .override(
-                                              font: GoogleFonts.nunito(
+                                  Padding(
+                                    padding: EdgeInsetsDirectional.fromSTEB(
+                                        4.0, 0.0, 0.0, 0.0),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.max,
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          listViewCareRecipientsRecord.name,
+                                          style: FlutterFlowTheme.of(context)
+                                              .bodyMedium
+                                              .override(
+                                                font: GoogleFonts.nunito(
+                                                  fontWeight: FontWeight.bold,
+                                                  fontStyle:
+                                                      FlutterFlowTheme.of(context)
+                                                          .bodyMedium
+                                                          .fontStyle,
+                                                ),
+                                                letterSpacing: 0.0,
                                                 fontWeight: FontWeight.bold,
                                                 fontStyle:
                                                     FlutterFlowTheme.of(context)
                                                         .bodyMedium
                                                         .fontStyle,
                                               ),
-                                              letterSpacing: 0.0,
-                                              fontWeight: FontWeight.bold,
-                                              fontStyle:
-                                                  FlutterFlowTheme.of(context)
-                                                      .bodyMedium
-                                                      .fontStyle,
-                                            ),
-                                      ),
-                                    ],
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
+                          onEnter: ((event) async {
+                            safeSetState(
+                                () => _hoveredRecipientIndex = listViewIndex);
+                          }),
+                          onExit: ((event) async {
+                            safeSetState(() {
+                              if (_hoveredRecipientIndex == listViewIndex) {
+                                _hoveredRecipientIndex = -1;
+                              }
+                            });
+                          }),
                         ),
-                        onEnter: ((event) async {
-                          safeSetState(
-                              () => _hoveredRecipientIndex = listViewIndex);
-                        }),
-                        onExit: ((event) async {
-                          safeSetState(() {
-                            if (_hoveredRecipientIndex == listViewIndex) {
-                              _hoveredRecipientIndex = -1;
-                            }
-                          });
-                        }),
                       );
                     },
                   );
@@ -204,25 +229,69 @@ class _PatentPickerSheetWidgetState extends State<PatentPickerSheetWidget> {
                 thickness: 1.0,
                 color: FlutterFlowTheme.of(context).alternate,
               ),
-              MouseRegion(
-                opaque: false,
-                cursor: SystemMouseCursors.click ?? MouseCursor.defer,
-                child: AnimatedContainer(
-                  duration: Duration(milliseconds: 150),
-                  curve: Curves.easeInOut,
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    color: _model.mouseRegionHovered!
-                        ? FlutterFlowTheme.of(context).primaryBackground
-                        : FlutterFlowTheme.of(context).secondaryBackground,
+              // The exported footer row lost its content: it was an empty
+              // MouseRegion/AnimatedContainer, so the sheet offered no visible
+              // way out (owner round-5 symptom 5). Restored as the sheet's
+              // Cancel row in the same design language as the recipient rows —
+              // same geometry, hover highlight and typography — popping with no
+              // value, because nothing was selected.
+              InkWell(
+                splashColor: Colors.transparent,
+                focusColor: Colors.transparent,
+                hoverColor: Colors.transparent,
+                highlightColor: Colors.transparent,
+                onTap: () => Navigator.pop(context),
+                child: MouseRegion(
+                  opaque: false,
+                  cursor: SystemMouseCursors.click ?? MouseCursor.defer,
+                  onEnter: ((event) async {
+                    safeSetState(() => _model.mouseRegionHovered = true);
+                  }),
+                  onExit: ((event) async {
+                    safeSetState(() => _model.mouseRegionHovered = false);
+                  }),
+                  child: AnimatedContainer(
+                    duration: Duration(milliseconds: 150),
+                    curve: Curves.easeInOut,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: _model.mouseRegionHovered!
+                          ? FlutterFlowTheme.of(context).primaryBackground
+                          : FlutterFlowTheme.of(context).secondaryBackground,
+                    ),
+                    child: Padding(
+                      padding: EdgeInsetsDirectional.fromSTEB(
+                          12.0, 8.0, 12.0, 8.0),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.max,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Text(
+                            'Cancel',
+                            style: FlutterFlowTheme.of(context)
+                                .bodyMedium
+                                .override(
+                                  font: GoogleFonts.nunito(
+                                    fontWeight: FontWeight.w600,
+                                    fontStyle: FlutterFlowTheme.of(context)
+                                        .bodyMedium
+                                        .fontStyle,
+                                  ),
+                                  color: FlutterFlowTheme.of(context)
+                                      .secondaryText,
+                                  letterSpacing: 0.0,
+                                  fontWeight: FontWeight.w600,
+                                  fontStyle: FlutterFlowTheme.of(context)
+                                      .bodyMedium
+                                      .fontStyle,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
-                onEnter: ((event) async {
-                  safeSetState(() => _model.mouseRegionHovered = true);
-                }),
-                onExit: ((event) async {
-                  safeSetState(() => _model.mouseRegionHovered = false);
-                }),
               ),
             ],
           ),

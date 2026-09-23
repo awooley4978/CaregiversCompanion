@@ -53,6 +53,45 @@ Stream<CareRecipientsRecord>? selectedRecipientVitalsStream() {
 DocumentReference? dashboardRecipientRef(CareRecipientsRecord? passed) =>
     passed?.reference ?? FFAppState().selectedCareRecipient;
 
+/// The care recipient the dashboard's header chip describes — and the one the
+/// picker sheet presents as active.
+///
+/// The chip used to render hardcoded demo copy ('M' / 'Mom') that no record
+/// backed, so the caregiver could not tell which profile the dashboard was
+/// showing (owner round-5 symptom 5). It now describes the dashboard's working
+/// recipient ([dashboardRecipientRef], plus any in-place pick) when that
+/// recipient is one of the caller's, else the first recipient.
+@visibleForTesting
+CareRecipientsRecord? dashboardChipRecipient(
+  List<CareRecipientsRecord> recipients,
+  DocumentReference? working,
+) {
+  if (recipients.isEmpty) {
+    return null;
+  }
+  if (working != null) {
+    for (final recipient in recipients) {
+      if (recipient.reference.path == working.path) {
+        return recipient;
+      }
+    }
+  }
+  return recipients.first;
+}
+
+/// The chip avatar's single letter: the recipient's initial ('M' for 'Mom').
+///
+/// `runes.take(1)` keeps a multi-byte first character whole instead of slicing
+/// a surrogate pair in half; there is no name to show when nothing is resolved.
+@visibleForTesting
+String recipientChipInitial(CareRecipientsRecord? recipient) {
+  final name = recipient?.name.trim() ?? '';
+  if (name.isEmpty) {
+    return '?';
+  }
+  return String.fromCharCodes(name.runes.take(1)).toUpperCase();
+}
+
 /// Newest-first ordering for the Care Checklist, applied in Dart.
 ///
 /// The recipient-scoped query must NOT `orderBy('created_time')`: Firestore
@@ -302,6 +341,15 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
 
   final scaffoldKey = GlobalKey<ScaffoldState>();
 
+  /// The recipient picked in the picker sheet while this dashboard is open.
+  ///
+  /// The sheet also sets `FFAppState().selectedCareRecipient` (what the child
+  /// sheets and cards read), but this page's own working recipient is *route
+  /// param first* ([dashboardRecipientRef]) — so on the pushed-with-param path
+  /// the selection alone would not switch THIS dashboard. A recipient chosen in
+  /// the sheet therefore wins here for the life of the page.
+  DocumentReference? _overrideRecipientRef;
+
   @override
   void initState() {
     super.initState();
@@ -335,7 +383,7 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
   /// The working care recipient for this dashboard: the route param when the
   /// page was pushed with one, else the app-wide selection.
   DocumentReference? get _recipientRef =>
-      dashboardRecipientRef(widget.careRecipients);
+      _overrideRecipientRef ?? dashboardRecipientRef(widget.careRecipients);
 
   /// Marks the resolved recipient's next pending dose as taken — the same
   /// `medications` write the Medication Tracker's check-circle performs (PR #22
@@ -550,6 +598,15 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                       containerCareRecipientsRecordList =
                                       snapshot.data!;
 
+                                  // Owner round-5 symptom 5: the chip read
+                                  // 'M' / 'Mom' whatever was loaded. It now
+                                  // names the recipient this dashboard is
+                                  // working on.
+                                  final chipRecipient = dashboardChipRecipient(
+                                    containerCareRecipientsRecordList,
+                                    _recipientRef,
+                                  );
+
                                   return Container(
                                     decoration: BoxDecoration(
                                       color: FlutterFlowTheme.of(context)
@@ -597,8 +654,23 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                                   ),
                                                 );
                                               },
-                                            ).then(
-                                                (value) => safeSetState(() {}));
+                                            ).then((value) {
+                                              // A row was tapped: the sheet
+                                              // already set the app-wide
+                                              // selection, so switch this
+                                              // dashboard to the chosen
+                                              // recipient in place. A
+                                              // dismissed sheet (no value)
+                                              // leaves the working recipient
+                                              // alone.
+                                              if (value is DocumentReference) {
+                                                safeSetState(() =>
+                                                    _overrideRecipientRef =
+                                                        value);
+                                              } else {
+                                                safeSetState(() {});
+                                              }
+                                            });
                                           },
                                           child: Row(
                                             mainAxisSize: MainAxisSize.max,
@@ -619,7 +691,8 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                                 alignment: AlignmentDirectional(
                                                     0.0, 0.0),
                                                 child: Text(
-                                                  'M',
+                                                  recipientChipInitial(
+                                                      chipRecipient),
                                                   textAlign: TextAlign.center,
                                                   maxLines: 1,
                                                   style: FlutterFlowTheme.of(
@@ -655,7 +728,10 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                                 ),
                                               ),
                                               Text(
-                                                'Mom',
+                                                valueOrDefault<String>(
+                                                  chipRecipient?.name,
+                                                  'Select recipient',
+                                                ),
                                                 style: FlutterFlowTheme.of(
                                                         context)
                                                     .labelLarge
