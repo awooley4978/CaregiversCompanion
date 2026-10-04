@@ -14,11 +14,27 @@ class SectionHeaderWidget extends StatefulWidget {
     super.key,
     String? action,
     String? title,
+    this.onAction,
   })  : this.action = action ?? 'Log New',
         this.title = title ?? 'Morning Vitals';
 
   final String action;
   final String title;
+
+  /// Optional tap action for the header's trailing button.
+  ///
+  /// The exported component built that button with NO `onPressed` and no
+  /// surrounding InkWell, so every section header that passed an [action]
+  /// ('Log New', 'View Schedule', ...) rendered a button that looked tappable
+  /// and did nothing (owner round-5 finding #3: "multiple 'Add New' on the page
+  /// but none are clickable").
+  ///
+  /// When this is null the header renders NO button at all: a section whose
+  /// create flow does not exist yet must not advertise one. That also removes
+  /// the misleading label the export produced for `action: ''`
+  /// (`valueOrDefault` treated the empty string as absent and fell back to the
+  /// component's 'Log New' default).
+  final VoidCallback? onAction;
 
   @override
   State<SectionHeaderWidget> createState() => _SectionHeaderWidgetState();
@@ -77,23 +93,28 @@ class _SectionHeaderWidgetState extends State<SectionHeaderWidget> {
                     lineHeight: 1.45,
                   ),
             ),
-            wrapWithModel(
-              model: _model.buttonModel,
-              updateCallback: () => safeSetState(() {}),
-              child: ButtonWidget(
-                iconPresent: false,
-                iconEndPresent: false,
-                content: valueOrDefault<String>(
-                  widget!.action,
-                  'Log New',
+            // No action -> no button. The header then renders exactly as it did
+            // visually for a section with nothing to tap, instead of an inert
+            // button-shaped label.
+            if (widget!.onAction != null)
+              wrapWithModel(
+                model: _model.buttonModel,
+                updateCallback: () => safeSetState(() {}),
+                child: ButtonWidget(
+                  iconPresent: false,
+                  iconEndPresent: false,
+                  content: valueOrDefault<String>(
+                    widget!.action,
+                    'Log New',
+                  ),
+                  variant: 'ghost',
+                  size: 'small',
+                  fullWidth: false,
+                  loading: false,
+                  disabled: false,
+                  onPressed: widget!.onAction,
                 ),
-                variant: 'ghost',
-                size: 'small',
-                fullWidth: false,
-                loading: false,
-                disabled: false,
               ),
-            ),
           ],
         ),
       ),
