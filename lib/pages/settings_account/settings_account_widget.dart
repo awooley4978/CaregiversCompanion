@@ -400,7 +400,7 @@ class _SettingsAccountWidgetState extends State<SettingsAccountWidget> {
                           child: InkWell(
                             borderRadius: BorderRadius.circular(16.0),
                             onTap: () =>
-                                context.go(HouseholdWidget.routePath),
+                                context.push(HouseholdWidget.routePath),
                             child: Container(
                               padding: EdgeInsetsDirectional.fromSTEB(
                                   20.0, 16.0, 20.0, 16.0),
