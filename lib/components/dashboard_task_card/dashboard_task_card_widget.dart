@@ -10,21 +10,52 @@ import 'package:provider/provider.dart';
 import 'dashboard_task_card_model.dart';
 export 'dashboard_task_card_model.dart';
 
+/// Toggles `completed` on an existing checklist document.
+///
+/// Returns false when the write is rejected (rules denial, offline, ...) so the
+/// caller can tell the caregiver instead of failing silently.
+@visibleForTesting
+Future<bool> setCarechecklistCompleted(
+    DocumentReference reference, bool completed) async {
+  try {
+    await reference.update({'completed': completed});
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/// Deletes an existing checklist document; false when the delete is rejected.
+@visibleForTesting
+Future<bool> deleteCarechecklistTask(DocumentReference reference) async {
+  try {
+    await reference.delete();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 class DashboardTaskCardWidget extends StatefulWidget {
   const DashboardTaskCardWidget({
     super.key,
     this.icon,
-    String? subtitle,
-    String? title,
-    bool? completed,
-  })  : this.subtitle = subtitle ?? 'Assist with wheelchair transfer',
-        this.title = title ?? 'Morning Mobility Exercise',
-        this.completed = completed ?? true;
+    this.subtitle,
+    this.title,
+    this.completed,
+    this.record,
+  });
 
   final Widget? icon;
-  final String subtitle;
-  final String title;
-  final bool completed;
+  final String? subtitle;
+  final String? title;
+  final bool? completed;
+
+  /// The checklist document this row stands for. When set, the row renders
+  /// THIS record's title/subtitle/completed and a tap toggles that same
+  /// document (the delete control removes it). The row never creates anything:
+  /// new tasks come only from the explicit 'Edit List' add action.
+  final CarechecklistRecord? record;
 
   @override
   State<DashboardTaskCardWidget> createState() =>
@@ -59,6 +90,13 @@ class _DashboardTaskCardWidgetState extends State<DashboardTaskCardWidget> {
   Widget build(BuildContext context) {
     context.watch<FFAppState>();
 
+    // Render the record's own values; the plain params remain for any caller
+    // that is not backed by a document.
+    final record = widget.record;
+    final title = record?.title ?? widget.title ?? '';
+    final subtitle = record?.subtitle ?? widget.subtitle ?? '';
+    final completed = record?.completed ?? widget.completed ?? false;
+
     return Padding(
       padding: EdgeInsetsDirectional.fromSTEB(0.0, 0.0, 0.0, 8.0),
       child: Container(
@@ -81,10 +119,7 @@ class _DashboardTaskCardWidgetState extends State<DashboardTaskCardWidget> {
                     height: 28.0,
                     decoration: BoxDecoration(
                       color: valueOrDefault<Color>(
-                        valueOrDefault<bool>(
-                          widget!.completed,
-                          true,
-                        )
+                        completed
                             ? FlutterFlowTheme.of(context).primary
                             : Colors.transparent,
                         FlutterFlowTheme.of(context).primary,
@@ -93,19 +128,13 @@ class _DashboardTaskCardWidgetState extends State<DashboardTaskCardWidget> {
                       shape: BoxShape.rectangle,
                       border: Border.all(
                         color: valueOrDefault<Color>(
-                          valueOrDefault<bool>(
-                            widget!.completed,
-                            true,
-                          )
+                          completed
                               ? FlutterFlowTheme.of(context).primary
                               : FlutterFlowTheme.of(context).alternate,
                           FlutterFlowTheme.of(context).primary,
                         ),
                         width: valueOrDefault<double>(
-                          valueOrDefault<bool>(
-                            widget!.completed,
-                            true,
-                          )
+                          completed
                               ? 2.0
                               : 2.0,
                           2.0,
@@ -114,10 +143,7 @@ class _DashboardTaskCardWidgetState extends State<DashboardTaskCardWidget> {
                     ),
                     alignment: AlignmentDirectional(0.0, 0.0),
                     child: Visibility(
-                      visible: valueOrDefault<bool>(
-                        widget!.completed,
-                        true,
-                      ),
+                      visible: completed,
                       child: Icon(
                         Icons.check_rounded,
                         color: FlutterFlowTheme.of(context).onPrimary,
@@ -133,35 +159,26 @@ class _DashboardTaskCardWidgetState extends State<DashboardTaskCardWidget> {
                       hoverColor: Colors.transparent,
                       highlightColor: Colors.transparent,
                       onTap: () async {
-                        // §5.2 item 4: only act when a valid recipient is
-                        // selected — the carechecklist doc lives in the
-                        // recipient's subcollection, so a null selection
-                        // would crash (null assert) and is denied by the
-                        // Phase-4 rules anyway (null parent fails the gate).
-                        final selected =
-                            FFAppState().selectedCareRecipient;
-                        if (selected == null) {
+                        // Tapping the row ticks/untick the task it shows. It
+                        // must never create a document (that fabricated a new
+                        // demo task per tap); creation lives behind 'Edit
+                        // List'.
+                        final target = widget.record;
+                        if (target == null) {
+                          return;
+                        }
+                        final ok = await setCarechecklistCompleted(
+                          target.reference,
+                          !target.completed,
+                        );
+                        if (!ok && context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
                               content: Text(
-                                  'Select a care recipient to add this task.'),
+                                  'Could not update the task. Please try again.'),
                             ),
                           );
-                          return;
                         }
-                        await CarechecklistRecord.createDoc(selected).set({
-                          ...createCarechecklistRecordData(
-                            title: widget!.title,
-                            subtitle: widget!.subtitle,
-                            iconeName: '',
-                            completed: false,
-                          ),
-                          ...mapToFirestore(
-                            {
-                              'created_time': FieldValue.serverTimestamp(),
-                            },
-                          ),
-                        });
                       },
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
@@ -169,10 +186,7 @@ class _DashboardTaskCardWidgetState extends State<DashboardTaskCardWidget> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            valueOrDefault<String>(
-                              widget!.title,
-                              'Morning Mobility Exercise',
-                            ),
+                            title,
                             style: FlutterFlowTheme.of(context)
                                 .bodyMedium
                                 .override(
@@ -193,10 +207,7 @@ class _DashboardTaskCardWidgetState extends State<DashboardTaskCardWidget> {
                                 ),
                           ),
                           Text(
-                            valueOrDefault<String>(
-                              widget!.subtitle,
-                              'Assist with wheelchair transfer',
-                            ),
+                            subtitle,
                             style:
                                 FlutterFlowTheme.of(context).bodySmall.override(
                                       font: GoogleFonts.nunito(
@@ -223,6 +234,37 @@ class _DashboardTaskCardWidgetState extends State<DashboardTaskCardWidget> {
                       ),
                     ),
                   ),
+                  if (record != null)
+                    IconButton(
+                      tooltip: 'Delete task',
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints: BoxConstraints(
+                        minWidth: 32.0,
+                        minHeight: 32.0,
+                      ),
+                      icon: Icon(
+                        Icons.delete_outline_rounded,
+                        color: FlutterFlowTheme.of(context).secondaryText,
+                        size: 20.0,
+                      ),
+                      onPressed: () async {
+                        final target = widget.record;
+                        if (target == null) {
+                          return;
+                        }
+                        final ok =
+                            await deleteCarechecklistTask(target.reference);
+                        if (!ok && context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                  'Could not delete the task. Please try again.'),
+                            ),
+                          );
+                        }
+                      },
+                    ),
                   Padding(
                     padding:
                         EdgeInsetsDirectional.fromSTEB(0.0, 0.0, 20.0, 0.0),

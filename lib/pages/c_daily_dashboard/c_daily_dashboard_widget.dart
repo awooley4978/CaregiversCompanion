@@ -3,6 +3,7 @@ import '/backend/org/org_service.dart';
 import '/components/add_meal_widget.dart';
 import '/components/button/button_widget.dart';
 import '/components/dashboard_notes_form/dashboard_notes_form_widget.dart';
+import '/components/dashboard_task_add_sheet/dashboard_task_add_sheet_widget.dart';
 import '/components/dashboard_task_card/dashboard_task_card_widget.dart';
 import '/components/nav_menu_directory/nav_menu_directory_widget.dart';
 import '/components/patent_picker_sheet_widget.dart';
@@ -2307,19 +2308,12 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                             child: Padding(
                                               padding: MediaQuery.viewInsetsOf(
                                                   context),
-                                              // The card dereferences its
-                                              // icon (`widget!.icon!`), so the
-                                              // modal must pass one — the same
-                                              // icon the checklist rows use.
-                                              child: DashboardTaskCardWidget(
-                                                icon: Icon(
-                                                  Icons
-                                                      .accessibility_new_rounded,
-                                                  color: FlutterFlowTheme.of(
-                                                          context)
-                                                      .secondaryText,
-                                                  size: 20.0,
-                                                ),
+                                              // 'Edit List' is the ONE place a
+                                              // checklist task is created: the
+                                              // rows themselves only toggle and
+                                              // delete the record they show.
+                                              child: DashboardTaskAddSheetWidget(
+                                                careRecipientRef: _recipientRef,
                                               ),
                                             ),
                                           );
@@ -2414,6 +2408,9 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                   crossAxisAlignment:
                                       CrossAxisAlignment.stretch,
                                   children: [
+                                    // Each row shows (and acts on) the record
+                                    // it was built from — title, subtitle and
+                                    // completed state come from the document.
                                     DashboardTaskCardWidget(
                                       key: Key(
                                           'Key258_${listViewIndex}_of_${listViewCarechecklistRecordList.length}'),
@@ -2423,10 +2420,7 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                             .secondaryText,
                                         size: 20.0,
                                       ),
-                                      subtitle:
-                                          'Assist with wheelchair transfer',
-                                      title: 'Morning Mobility Exercise',
-                                      completed: true,
+                                      record: listViewCarechecklistRecord,
                                     ),
                                   ],
                                 );
