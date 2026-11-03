@@ -127,15 +127,39 @@ void main() {
     expect(saved.completed, isFalse);
   });
 
-  testWidgets('the delete control removes the task', (tester) async {
+  testWidgets('the delete control asks first, then removes the task',
+      (tester) async {
     final record = await seedTask();
     await pumpCard(tester, record);
 
     await tester.tap(find.byIcon(Icons.delete_outline_rounded));
     await tester.pumpAndSettle();
 
+    // Deleting is permanent, so it asks before touching the record.
+    expect(find.text('Delete Task?'), findsOneWidget);
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+
     final all = await queryCarechecklistRecordOnce(parent: recipient);
     expect(all, isEmpty);
+  });
+
+  testWidgets('cancelling the delete confirmation keeps the task',
+      (tester) async {
+    final record = await seedTask();
+    await pumpCard(tester, record);
+
+    await tester.tap(find.byIcon(Icons.delete_outline_rounded));
+    await tester.pumpAndSettle();
+    expect(find.text('Delete Task?'), findsOneWidget);
+
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Delete Task?'), findsNothing);
+    final all = await queryCarechecklistRecordOnce(parent: recipient);
+    expect(all.length, 1);
+    expect(all.first.title, 'Give morning meds');
   });
 
   testWidgets('a denied delete shows a snackbar and keeps the task',
@@ -150,6 +174,8 @@ void main() {
     );
     await tester.tap(find.byIcon(Icons.delete_outline_rounded));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
 
     expect(find.text('Could not delete the task. Please try again.'),
         findsOneWidget);
@@ -157,7 +183,10 @@ void main() {
     expect(all.length, 1);
   });
 
-  Future<void> openAddSheet(WidgetTester tester) async {
+  Future<void> openAddSheet(
+    WidgetTester tester, {
+    List<CarechecklistRecord>? existing,
+  }) async {
     await tester.pumpWidget(
       ChangeNotifierProvider<FFAppState>.value(
         value: FFAppState(),
@@ -168,8 +197,12 @@ void main() {
                 onPressed: () => showModalBottomSheet(
                   context: context,
                   isScrollControlled: true,
-                  builder: (_) =>
-                      DashboardTaskAddSheetWidget(careRecipientRef: recipient),
+                  builder: (_) => DashboardTaskAddSheetWidget(
+                    careRecipientRef: recipient,
+                    existingTasksStream: existing == null
+                        ? null
+                        : Stream<List<CarechecklistRecord>>.value(existing),
+                  ),
                 ),
                 child: const Text('Edit List'),
               ),
@@ -196,6 +229,64 @@ void main() {
     expect(all.first.title, 'Afternoon walk');
     expect(all.first.subtitle, 'Around the garden');
     expect(all.first.completed, isFalse);
+  });
+
+  testWidgets('Edit List lets an existing task be edited in place',
+      (tester) async {
+    final record = await seedTask();
+    await openAddSheet(tester, existing: [record]);
+
+    // The list action shows the caregiver's real tasks, each with an edit
+    // control (this used to be add-only).
+    expect(find.text('Give morning meds'), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.edit_outlined));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Edit checklist task'), findsOneWidget);
+    expect(
+      tester.widget<TextField>(find.byType(TextField).at(0)).controller!.text,
+      'Give morning meds',
+    );
+    expect(
+      tester.widget<TextField>(find.byType(TextField).at(1)).controller!.text,
+      'With breakfast',
+    );
+
+    await tester.enterText(find.byType(TextField).at(0), 'Give evening meds');
+    await tester.enterText(find.byType(TextField).at(1), 'With dinner');
+    await tester.tap(find.text('Save Changes'));
+    await tester.pumpAndSettle();
+
+    // It UPDATES that record — it does not append a second task.
+    final all = await queryCarechecklistRecordOnce(parent: recipient);
+    expect(all.length, 1);
+    final saved = await CarechecklistRecord.getDocumentOnce(record.reference);
+    expect(saved.title, 'Give evening meds');
+    expect(saved.subtitle, 'With dinner');
+    expect(saved.completed, isFalse);
+  });
+
+  testWidgets('a denied edit shows a snackbar and leaves the task unchanged',
+      (tester) async {
+    final record = await seedTask();
+    await openAddSheet(tester, existing: [record]);
+
+    await tester.tap(find.byIcon(Icons.edit_outlined));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).at(0), 'Give evening meds');
+
+    fakeFirestore.writeError = FirebaseException(
+      plugin: 'cloud_firestore',
+      code: 'permission-denied',
+      message: 'Missing or insufficient permissions.',
+    );
+    await tester.tap(find.text('Save Changes'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Could not save the task. Please try again.'),
+        findsOneWidget);
+    final saved = await CarechecklistRecord.getDocumentOnce(record.reference);
+    expect(saved.title, 'Give morning meds');
   });
 
   testWidgets('a denied add shows a snackbar and creates nothing',

@@ -253,6 +253,34 @@ class _DashboardTaskCardWidgetState extends State<DashboardTaskCardWidget> {
                         if (target == null) {
                           return;
                         }
+                        // Deleting a task is permanent, so it asks first: a
+                        // mis-tap on the row's bin must not lose the task.
+                        final confirmed = await showDialog<bool>(
+                              context: context,
+                              builder: (alertDialogContext) {
+                                return AlertDialog(
+                                  title: Text('Delete Task?'),
+                                  content: Text(
+                                      'This task will be permanently deleted'),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(
+                                          alertDialogContext, false),
+                                      child: Text('Cancel'),
+                                    ),
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(
+                                          alertDialogContext, true),
+                                      child: Text('Delete'),
+                                    ),
+                                  ],
+                                );
+                              },
+                            ) ??
+                            false;
+                        if (!confirmed) {
+                          return;
+                        }
                         final ok =
                             await deleteCarechecklistTask(target.reference);
                         if (!ok && context.mounted) {

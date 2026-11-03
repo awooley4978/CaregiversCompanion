@@ -2308,12 +2308,18 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                             child: Padding(
                                               padding: MediaQuery.viewInsetsOf(
                                                   context),
-                                              // 'Edit List' is the ONE place a
-                                              // checklist task is created: the
-                                              // rows themselves only toggle and
-                                              // delete the record they show.
+                                              // 'Edit List' is the checklist's
+                                              // list action: it lists the
+                                              // existing tasks (each editable)
+                                              // and is the ONE place a task is
+                                              // created — the rows themselves
+                                              // only toggle and delete the
+                                              // record they show.
                                               child: DashboardTaskAddSheetWidget(
                                                 careRecipientRef: _recipientRef,
+                                                existingTasksStream:
+                                                    carechecklistForParent(
+                                                        _recipientRef),
                                               ),
                                             ),
                                           );
