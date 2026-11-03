@@ -9,6 +9,8 @@
 //   * a row can be deleted,
 //   * new tasks are created only by the explicit 'Edit List' add sheet,
 //   * a rejected write (rules denial) is surfaced, never silent.
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:new_project/app_state.dart';
@@ -54,7 +56,11 @@ void main() {
     return CarechecklistRecord.getDocumentOnce(ref);
   }
 
-  Future<void> pumpCard(WidgetTester tester, CarechecklistRecord record) async {
+  Future<void> pumpCard(
+    WidgetTester tester,
+    CarechecklistRecord record, {
+    CarechecklistToggle? toggleCompleted,
+  }) async {
     await tester.pumpWidget(
       ChangeNotifierProvider<FFAppState>.value(
         value: FFAppState(),
@@ -63,6 +69,7 @@ void main() {
             body: DashboardTaskCardWidget(
               record: record,
               icon: const Icon(Icons.accessibility_new_rounded),
+              toggleCompleted: toggleCompleted,
             ),
           ),
         ),
@@ -125,6 +132,63 @@ void main() {
         findsOneWidget);
     final saved = await CarechecklistRecord.getDocumentOnce(record.reference);
     expect(saved.completed, isFalse);
+  });
+
+  testWidgets('a rapid double tap issues exactly one write', (tester) async {
+    final record = await seedTask(completed: false);
+    // Hold the toggle write open so the second tap lands while it is in
+    // flight — the race the guard exists for.
+    final release = Completer<void>();
+    var writes = 0;
+    await pumpCard(tester, record, toggleCompleted: (ref, completed) async {
+      writes++;
+      await release.future;
+      return setCarechecklistCompleted(ref, completed);
+    });
+
+    await tester.tap(find.text('Give morning meds'));
+    await tester.pump();
+
+    // While the write is on the wire the row is visibly non-interactive.
+    expect(
+      tester
+          .widget<Opacity>(find
+              .ancestor(
+                of: find.text('Give morning meds'),
+                matching: find.byType(Opacity),
+              )
+              .first)
+          .opacity,
+      lessThan(1.0),
+    );
+
+    // Second tap of the double tap: ignored, not a second overlapping write.
+    await tester.tap(find.text('Give morning meds'));
+    await tester.pump();
+    expect(writes, 1);
+
+    release.complete();
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    // One write, and it is the one the caregiver's tap asked for (unticked ->
+    // ticked), not a second write flipping it back.
+    expect(writes, 1);
+    final saved = await CarechecklistRecord.getDocumentOnce(record.reference);
+    expect(saved.completed, isTrue);
+
+    // The row is interactive again once the write has landed.
+    expect(
+      tester
+          .widget<Opacity>(find
+              .ancestor(
+                of: find.text('Give morning meds'),
+                matching: find.byType(Opacity),
+              )
+              .first)
+          .opacity,
+      1.0,
+    );
   });
 
   testWidgets('the delete control asks first, then removes the task',

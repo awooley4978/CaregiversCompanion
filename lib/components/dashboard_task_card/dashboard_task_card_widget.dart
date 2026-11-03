@@ -25,6 +25,10 @@ Future<bool> setCarechecklistCompleted(
   }
 }
 
+/// The write a row tap performs: flip `completed` on the task it shows.
+typedef CarechecklistToggle = Future<bool> Function(
+    DocumentReference reference, bool completed);
+
 /// Deletes an existing checklist document; false when the delete is rejected.
 @visibleForTesting
 Future<bool> deleteCarechecklistTask(DocumentReference reference) async {
@@ -44,6 +48,7 @@ class DashboardTaskCardWidget extends StatefulWidget {
     this.title,
     this.completed,
     this.record,
+    this.toggleCompleted,
   });
 
   final Widget? icon;
@@ -57,6 +62,12 @@ class DashboardTaskCardWidget extends StatefulWidget {
   /// new tasks come only from the explicit 'Edit List' add action.
   final CarechecklistRecord? record;
 
+  /// The write a row tap performs. Production always uses
+  /// [setCarechecklistCompleted]; tests inject a version that holds the write
+  /// open so they can tap again while it is in flight.
+  @visibleForTesting
+  final CarechecklistToggle? toggleCompleted;
+
   @override
   State<DashboardTaskCardWidget> createState() =>
       _DashboardTaskCardWidgetState();
@@ -64,6 +75,12 @@ class DashboardTaskCardWidget extends StatefulWidget {
 
 class _DashboardTaskCardWidgetState extends State<DashboardTaskCardWidget> {
   late DashboardTaskCardModel _model;
+
+  /// True while this row's toggle write is on the wire. A second tap before it
+  /// resolves is ignored: it would otherwise compute `!completed` from the same
+  /// stale record and issue an overlapping write, leaving the task in a state
+  /// that contradicts what the caregiver tapped.
+  bool _toggleInFlight = false;
 
   @override
   void setState(VoidCallback callback) {
@@ -164,13 +181,21 @@ class _DashboardTaskCardWidgetState extends State<DashboardTaskCardWidget> {
                         // demo task per tap); creation lives behind 'Edit
                         // List'.
                         final target = widget.record;
-                        if (target == null) {
+                        // One write at a time per row: while it is in flight
+                        // the row is dimmed and further taps are ignored.
+                        if (target == null || _toggleInFlight) {
                           return;
                         }
-                        final ok = await setCarechecklistCompleted(
+                        safeSetState(() => _toggleInFlight = true);
+                        final ok = await (widget.toggleCompleted ??
+                            setCarechecklistCompleted)(
                           target.reference,
                           !target.completed,
                         );
+                        if (!mounted) {
+                          return;
+                        }
+                        safeSetState(() => _toggleInFlight = false);
                         if (!ok && context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
@@ -180,57 +205,60 @@ class _DashboardTaskCardWidgetState extends State<DashboardTaskCardWidget> {
                           );
                         }
                       },
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        mainAxisAlignment: MainAxisAlignment.start,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            title,
-                            style: FlutterFlowTheme.of(context)
-                                .bodyMedium
-                                .override(
-                                  font: GoogleFonts.nunito(
+                      child: Opacity(
+                        opacity: _toggleInFlight ? 0.4 : 1.0,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          mainAxisAlignment: MainAxisAlignment.start,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              style: FlutterFlowTheme.of(context)
+                                  .bodyMedium
+                                  .override(
+                                    font: GoogleFonts.nunito(
+                                      fontWeight: FontWeight.w500,
+                                      fontStyle: FlutterFlowTheme.of(context)
+                                          .bodyMedium
+                                          .fontStyle,
+                                    ),
+                                    color:
+                                        FlutterFlowTheme.of(context).primaryText,
+                                    letterSpacing: 0.0,
                                     fontWeight: FontWeight.w500,
                                     fontStyle: FlutterFlowTheme.of(context)
                                         .bodyMedium
                                         .fontStyle,
+                                    lineHeight: 1.6,
                                   ),
-                                  color:
-                                      FlutterFlowTheme.of(context).primaryText,
-                                  letterSpacing: 0.0,
-                                  fontWeight: FontWeight.w500,
-                                  fontStyle: FlutterFlowTheme.of(context)
-                                      .bodyMedium
-                                      .fontStyle,
-                                  lineHeight: 1.6,
-                                ),
-                          ),
-                          Text(
-                            subtitle,
-                            style:
-                                FlutterFlowTheme.of(context).bodySmall.override(
-                                      font: GoogleFonts.nunito(
+                            ),
+                            Text(
+                              subtitle,
+                              style:
+                                  FlutterFlowTheme.of(context).bodySmall.override(
+                                        font: GoogleFonts.nunito(
+                                          fontWeight: FlutterFlowTheme.of(context)
+                                              .bodySmall
+                                              .fontWeight,
+                                          fontStyle: FlutterFlowTheme.of(context)
+                                              .bodySmall
+                                              .fontStyle,
+                                        ),
+                                        color: FlutterFlowTheme.of(context)
+                                            .secondaryText,
+                                        letterSpacing: 0.0,
                                         fontWeight: FlutterFlowTheme.of(context)
                                             .bodySmall
                                             .fontWeight,
                                         fontStyle: FlutterFlowTheme.of(context)
                                             .bodySmall
                                             .fontStyle,
+                                        lineHeight: 1.5,
                                       ),
-                                      color: FlutterFlowTheme.of(context)
-                                          .secondaryText,
-                                      letterSpacing: 0.0,
-                                      fontWeight: FlutterFlowTheme.of(context)
-                                          .bodySmall
-                                          .fontWeight,
-                                      fontStyle: FlutterFlowTheme.of(context)
-                                          .bodySmall
-                                          .fontStyle,
-                                      lineHeight: 1.5,
-                                    ),
-                          ),
-                        ].divide(SizedBox(height: 2.0)),
+                            ),
+                          ].divide(SizedBox(height: 2.0)),
+                        ),
                       ),
                     ),
                   ),
