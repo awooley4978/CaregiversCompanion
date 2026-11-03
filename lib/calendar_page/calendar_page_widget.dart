@@ -104,57 +104,81 @@ class _CalendarPageWidgetState extends State<CalendarPageWidget> {
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          Column(
+                          Row(
                             mainAxisSize: MainAxisSize.min,
                             mainAxisAlignment: MainAxisAlignment.start,
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
-                              Text(
-                                'March 2024',
-                                style: FlutterFlowTheme.of(context)
-                                    .headlineSmall
-                                    .override(
-                                      font: GoogleFonts.dmSans(
-                                        fontWeight: FontWeight.bold,
-                                        fontStyle: FlutterFlowTheme.of(context)
-                                            .headlineSmall
-                                            .fontStyle,
-                                      ),
-                                      color: FlutterFlowTheme.of(context)
-                                          .primaryText,
-                                      letterSpacing: 0.0,
-                                      fontWeight: FontWeight.bold,
-                                      fontStyle: FlutterFlowTheme.of(context)
+                              FlutterFlowIconButton(
+                                key: const ValueKey('calendarBackButton'),
+                                borderRadius: 8.0,
+                                buttonSize: 40.0,
+                                fillColor: Colors.transparent,
+                                icon: Icon(
+                                  Icons.arrow_back_rounded,
+                                  color:
+                                      FlutterFlowTheme.of(context).primaryText,
+                                  size: 24.0,
+                                ),
+                                onPressed: () => context.safePop(),
+                              ),
+                              Padding(
+                                padding: EdgeInsetsDirectional.fromSTEB(
+                                    12.0, 0.0, 0.0, 0.0),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  mainAxisAlignment: MainAxisAlignment.start,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'March 2024',
+                                      style: FlutterFlowTheme.of(context)
                                           .headlineSmall
-                                          .fontStyle,
+                                          .override(
+                                            font: GoogleFonts.dmSans(
+                                              fontWeight: FontWeight.bold,
+                                              fontStyle: FlutterFlowTheme.of(context)
+                                                  .headlineSmall
+                                                  .fontStyle,
+                                            ),
+                                            color: FlutterFlowTheme.of(context)
+                                                .primaryText,
+                                            letterSpacing: 0.0,
+                                            fontWeight: FontWeight.bold,
+                                            fontStyle: FlutterFlowTheme.of(context)
+                                                .headlineSmall
+                                                .fontStyle,
+                                          ),
                                     ),
-                              ),
-                              Text(
-                                'You have 3 tasks today',
-                                style: FlutterFlowTheme.of(context)
-                                    .bodySmall
-                                    .override(
-                                      font: GoogleFonts.nunito(
-                                        fontWeight: FlutterFlowTheme.of(context)
-                                            .bodySmall
-                                            .fontWeight,
-                                        fontStyle: FlutterFlowTheme.of(context)
-                                            .bodySmall
-                                            .fontStyle,
-                                      ),
-                                      color: FlutterFlowTheme.of(context)
-                                          .secondaryText,
-                                      letterSpacing: 0.0,
-                                      fontWeight: FlutterFlowTheme.of(context)
+                                    Text(
+                                      'You have 3 tasks today',
+                                      style: FlutterFlowTheme.of(context)
                                           .bodySmall
-                                          .fontWeight,
-                                      fontStyle: FlutterFlowTheme.of(context)
-                                          .bodySmall
-                                          .fontStyle,
-                                      lineHeight: 1.4,
+                                          .override(
+                                            font: GoogleFonts.nunito(
+                                              fontWeight: FlutterFlowTheme.of(context)
+                                                  .bodySmall
+                                                  .fontWeight,
+                                              fontStyle: FlutterFlowTheme.of(context)
+                                                  .bodySmall
+                                                  .fontStyle,
+                                            ),
+                                            color: FlutterFlowTheme.of(context)
+                                                .secondaryText,
+                                            letterSpacing: 0.0,
+                                            fontWeight: FlutterFlowTheme.of(context)
+                                                .bodySmall
+                                                .fontWeight,
+                                            fontStyle: FlutterFlowTheme.of(context)
+                                                .bodySmall
+                                                .fontStyle,
+                                            lineHeight: 1.4,
+                                          ),
                                     ),
+                                  ].divide(SizedBox(height: 4.0)),
+                                ),
                               ),
-                            ].divide(SizedBox(height: 4.0)),
+                            ],
                           ),
                           FlutterFlowIconButton(
                             borderRadius: 8.0,
