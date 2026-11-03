@@ -153,6 +153,21 @@ class MemoryFirestorePlatform extends FirebaseFirestorePlatform {
   /// Test helper: read raw data for [path] (null when absent).
   Map<String, dynamic>? dataAt(String path) => docs[path];
 
+  /// Test helper: when set, every subsequent write (set/update/delete/batch
+  /// commit) throws this error — the stand-in for a Firestore rules denial,
+  /// so the UI's failure feedback can be exercised. Null = writes succeed.
+  Object? writeError;
+
+  /// Test helper: let writes succeed again.
+  void clearWriteError() => writeError = null;
+
+  void checkWritesAllowed() {
+    final error = writeError;
+    if (error != null) {
+      throw error;
+    }
+  }
+
   @override
   FirebaseFirestorePlatform delegateFor({
     required FirebaseApp app,
@@ -293,11 +308,13 @@ class _MemoryDocumentReference extends DocumentReferencePlatform {
 
   @override
   Future<void> set(Map<String, dynamic> data, [SetOptions? options]) async {
+    _store.checkWritesAllowed();
     _store.writeDoc(path, data, options: options);
   }
 
   @override
   Future<void> update(Map<FieldPath, dynamic> data) async {
+    _store.checkWritesAllowed();
     final existing =
         Map<String, dynamic>.from(_store.docs[path] ?? const {});
     data.forEach((fieldPath, value) {
@@ -316,6 +333,7 @@ class _MemoryDocumentReference extends DocumentReferencePlatform {
 
   @override
   Future<void> delete() async {
+    _store.checkWritesAllowed();
     _store.deleteDoc(path);
   }
 
@@ -520,6 +538,7 @@ class _MemoryWriteBatch extends WriteBatchPlatform {
 
   @override
   Future<void> commit() async {
+    _store.checkWritesAllowed();
     // Apply atomically from the batch's perspective (no interleaving with
     // other writes is possible in a single-threaded test).
     for (final op in _ops) {
