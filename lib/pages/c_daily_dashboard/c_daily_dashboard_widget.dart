@@ -3,6 +3,8 @@ import '/backend/org/org_service.dart';
 import '/components/add_meal_widget.dart';
 import '/components/button/button_widget.dart';
 import '/components/dashboard_notes_form/dashboard_notes_form_widget.dart';
+import '/components/dashboard_symptom_add_sheet/dashboard_symptom_add_sheet_widget.dart';
+import '/components/dashboard_symptom_card/dashboard_symptom_card_widget.dart';
 import '/components/dashboard_task_add_sheet/dashboard_task_add_sheet_widget.dart';
 import '/components/dashboard_task_card/dashboard_task_card_widget.dart';
 import '/components/nav_menu_directory/nav_menu_directory_widget.dart';
@@ -351,6 +353,36 @@ Future<void> openAddMealSheet(
     },
   );
 }
+
+/// Opens the 'Log New Symptom' sheet for [recipientRef] — the ONE create path
+/// for a `symptomEntries` document (the row cards only ever update their own
+/// record, so a row tap can no longer fabricate a duplicate entry).
+@visibleForTesting
+Future<void> openLogSymptomSheet(
+  BuildContext context,
+  DocumentReference? recipientRef,
+) {
+  return showModalBottomSheet(
+    isScrollControlled: true,
+    backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
+    enableDrag: false,
+    context: context,
+    builder: (context) {
+      return GestureDetector(
+        onTap: () {
+          FocusScope.of(context).unfocus();
+          FocusManager.instance.primaryFocus?.unfocus();
+        },
+        child: Padding(
+          padding: MediaQuery.viewInsetsOf(context),
+          child: DashboardSymptomAddSheetWidget(
+            careRecipientRef: recipientRef,
+          ),
+        ),
+      );
+    },
+  );
+}
 class CDailyDashboardWidget extends StatefulWidget {
   const CDailyDashboardWidget({
     super.key,
@@ -487,6 +519,14 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
   /// itself pops on a successful save).
   Future<void> _openAddMealSheet(BuildContext context) async {
     await openAddMealSheet(context, _recipientRef);
+    safeSetState(() {});
+  }
+
+  /// The Symptoms section's 'Log New Symptom' entry point: the sheet in
+  /// [openLogSymptomSheet], then a rebuild so the section's live stream picks
+  /// the new entry up (the sheet pops on a successful save).
+  Future<void> _openLogSymptomSheet(BuildContext context) async {
+    await openLogSymptomSheet(context, _recipientRef);
     safeSetState(() {});
   }
   @override
@@ -1246,13 +1286,15 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                         model: _model.sectionHeaderModel3,
                                         updateCallback: () =>
                                             safeSetState(() {}),
-                                        // No action: logging a symptom
-                                        // entry is an owner-decision item, so
-                                        // the header shows no button (the ''
-                                        // label used to render as a dead
-                                        // 'Log New').
+                                        // The section's ONE create path
+                                        // (owner-confirmed symptom spec):
+                                        // the rows themselves only resolve
+                                        // the record they show.
                                         child: SectionHeaderWidget(
+                                          action: 'Log New Symptom',
                                           title: 'Symptoms',
+                                          onAction: () =>
+                                              _openLogSymptomSheet(context),
                                         ),
                                       ),
                                     ),
@@ -1309,229 +1351,9 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                             final listViewSymptomEntriesRecord =
                                                 listViewSymptomEntriesRecordList[
                                                     listViewIndex];
-                                            return Container(
-                                              decoration: BoxDecoration(
-                                                color:
-                                                    FlutterFlowTheme.of(context)
-                                                        .secondaryBackground,
-                                                borderRadius:
-                                                    BorderRadius.circular(36.0),
-                                                shape: BoxShape.rectangle,
-                                                border: Border.all(
-                                                  color: FlutterFlowTheme.of(
-                                                          context)
-                                                      .tertiary,
-                                                  width: 1.0,
-                                                ),
-                                              ),
-                                              child: Padding(
-                                                padding: EdgeInsets.all(16.0),
-                                                child: Container(
-                                                  decoration: BoxDecoration(),
-                                                  child: Row(
-                                                    mainAxisSize:
-                                                        MainAxisSize.max,
-                                                    mainAxisAlignment:
-                                                        MainAxisAlignment.start,
-                                                    crossAxisAlignment:
-                                                        CrossAxisAlignment
-                                                            .center,
-                                                    children: [
-                                                      Container(
-                                                        width: 48.0,
-                                                        height: 48.0,
-                                                        decoration:
-                                                            BoxDecoration(
-                                                          color: FlutterFlowTheme
-                                                                  .of(context)
-                                                              .tertiary,
-                                                          borderRadius:
-                                                              BorderRadius
-                                                                  .circular(
-                                                                      28.0),
-                                                          shape: BoxShape
-                                                              .rectangle,
-                                                        ),
-                                                        alignment:
-                                                            AlignmentDirectional(
-                                                                0.0, 0.0),
-                                                        child: Icon(
-                                                          Icons
-                                                              .admin_panel_settings,
-                                                          color: FlutterFlowTheme
-                                                                  .of(context)
-                                                              .primaryText,
-                                                          size: 24.0,
-                                                        ),
-                                                      ),
-                                                      Expanded(
-                                                        flex: 1,
-                                                        child: Column(
-                                                          mainAxisSize:
-                                                              MainAxisSize.min,
-                                                          mainAxisAlignment:
-                                                              MainAxisAlignment
-                                                                  .start,
-                                                          crossAxisAlignment:
-                                                              CrossAxisAlignment
-                                                                  .start,
-                                                          children: [
-                                                            Text(
-                                                              listViewSymptomEntriesRecord
-                                                                  .symptomName,
-                                                              style: FlutterFlowTheme
-                                                                      .of(context)
-                                                                  .bodyLarge
-                                                                  .override(
-                                                                    font: GoogleFonts
-                                                                        .nunito(
-                                                                      fontWeight:
-                                                                          FontWeight
-                                                                              .w600,
-                                                                      fontStyle: FlutterFlowTheme.of(
-                                                                              context)
-                                                                          .bodyLarge
-                                                                          .fontStyle,
-                                                                    ),
-                                                                    color: FlutterFlowTheme.of(
-                                                                            context)
-                                                                        .primaryText,
-                                                                    letterSpacing:
-                                                                        0.0,
-                                                                    fontWeight:
-                                                                        FontWeight
-                                                                            .w600,
-                                                                    fontStyle: FlutterFlowTheme.of(
-                                                                            context)
-                                                                        .bodyLarge
-                                                                        .fontStyle,
-                                                                    lineHeight:
-                                                                        1.6,
-                                                                  ),
-                                                            ),
-                                                            Text(
-                                                              listViewSymptomEntriesRecord
-                                                                  .note,
-                                                              style: FlutterFlowTheme
-                                                                      .of(context)
-                                                                  .bodySmall
-                                                                  .override(
-                                                                    font: GoogleFonts
-                                                                        .nunito(
-                                                                      fontWeight: FlutterFlowTheme.of(
-                                                                              context)
-                                                                          .bodySmall
-                                                                          .fontWeight,
-                                                                      fontStyle: FlutterFlowTheme.of(
-                                                                              context)
-                                                                          .bodySmall
-                                                                          .fontStyle,
-                                                                    ),
-                                                                    color: FlutterFlowTheme.of(
-                                                                            context)
-                                                                        .secondaryText,
-                                                                    letterSpacing:
-                                                                        0.0,
-                                                                    fontWeight: FlutterFlowTheme.of(
-                                                                            context)
-                                                                        .bodySmall
-                                                                        .fontWeight,
-                                                                    fontStyle: FlutterFlowTheme.of(
-                                                                            context)
-                                                                        .bodySmall
-                                                                        .fontStyle,
-                                                                    lineHeight:
-                                                                        1.5,
-                                                                  ),
-                                                            ),
-                                                            Text(
-                                                              valueOrDefault<
-                                                                  String>(
-                                                                listViewSymptomEntriesRecord
-                                                                    .timeLogged
-                                                                    ?.toString(),
-                                                                'Time Logged',
-                                                              ),
-                                                              style: FlutterFlowTheme
-                                                                      .of(context)
-                                                                  .bodyMedium
-                                                                  .override(
-                                                                    font: GoogleFonts
-                                                                        .nunito(
-                                                                      fontWeight: FlutterFlowTheme.of(
-                                                                              context)
-                                                                          .bodyMedium
-                                                                          .fontWeight,
-                                                                      fontStyle: FlutterFlowTheme.of(
-                                                                              context)
-                                                                          .bodyMedium
-                                                                          .fontStyle,
-                                                                    ),
-                                                                    letterSpacing:
-                                                                        0.0,
-                                                                    fontWeight: FlutterFlowTheme.of(
-                                                                            context)
-                                                                        .bodyMedium
-                                                                        .fontWeight,
-                                                                    fontStyle: FlutterFlowTheme.of(
-                                                                            context)
-                                                                        .bodyMedium
-                                                                        .fontStyle,
-                                                                  ),
-                                                            ),
-                                                          ].divide(SizedBox(
-                                                              height: 2.0)),
-                                                        ),
-                                                      ),
-                                                      InkWell(
-                                                        splashColor:
-                                                            Colors.transparent,
-                                                        focusColor:
-                                                            Colors.transparent,
-                                                        hoverColor:
-                                                            Colors.transparent,
-                                                        highlightColor:
-                                                            Colors.transparent,
-                                                        onTap: () async {
-                                                          await SymptomEntriesRecord
-                                                              .collection
-                                                              .doc()
-                                                              .set(
-                                                                  createSymptomEntriesRecordData(
-                                                                symptomName:
-                                                                    listViewSymptomEntriesRecord
-                                                                        .symptomName,
-                                                                note:
-                                                                    listViewSymptomEntriesRecord
-                                                                        .note,
-                                                                timeLogged:
-                                                                    listViewSymptomEntriesRecord
-                                                                        .timeLogged,
-                                                                patientRef:
-                                                                    listViewSymptomEntriesRecord
-                                                                        .patientRef,
-                                                                isResolved:
-                                                                    false,
-                                                              ));
-                                                        },
-                                                        child: ButtonWidget(
-                                                          key: Key(
-                                                              'Key7v7_${listViewIndex}_of_${listViewSymptomEntriesRecordList.length}'),
-                                                          iconPresent: false,
-                                                          iconEndPresent: false,
-                                                          content: 'Add Entry',
-                                                          variant: 'primary',
-                                                          size: 'small',
-                                                          fullWidth: false,
-                                                          loading: false,
-                                                          disabled: false,
-                                                        ),
-                                                      ),
-                                                    ].divide(
-                                                        SizedBox(width: 16.0)),
-                                                  ),
-                                                ),
-                                              ),
+                                            return DashboardSymptomCardWidget(
+                                              record:
+                                                  listViewSymptomEntriesRecord,
                                             );
                                           },
                                         );
