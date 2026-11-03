@@ -144,6 +144,8 @@ class _NavMenuDirectoryWidgetState extends State<NavMenuDirectoryWidget> {
                             hoverColor: Colors.transparent,
                             highlightColor: Colors.transparent,
                             onTap: () async {
+                              Navigator.pop(context);
+
                               context
                                   .pushNamed(AClientDirectoryWidget.routeName);
                             },
@@ -181,6 +183,8 @@ class _NavMenuDirectoryWidgetState extends State<NavMenuDirectoryWidget> {
                             hoverColor: Colors.transparent,
                             highlightColor: Colors.transparent,
                             onTap: () async {
+                              Navigator.pop(context);
+
                               context
                                   .pushNamed(AClientDirectoryWidget.routeName);
                             },
@@ -357,6 +361,8 @@ class _NavMenuDirectoryWidgetState extends State<NavMenuDirectoryWidget> {
                             hoverColor: Colors.transparent,
                             highlightColor: Colors.transparent,
                             onTap: () async {
+                              Navigator.pop(context);
+
                               context
                                   .pushNamed(CDailyDashboardWidget.routeName);
                             },
@@ -387,43 +393,56 @@ class _NavMenuDirectoryWidgetState extends State<NavMenuDirectoryWidget> {
                           child: Padding(
                             padding: EdgeInsetsDirectional.fromSTEB(
                                 0.0, 0.0, 0.0, 6.0),
-                            child: Container(
-                              width: 260.0,
-                              height: 31.2,
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.only(
-                                  topLeft: Radius.circular(16.0),
-                                  topRight: Radius.circular(16.0),
-                                  bottomLeft: Radius.circular(16.0),
-                                  bottomRight: Radius.circular(16.0),
+                            child: InkWell(
+                              splashColor: Colors.transparent,
+                              focusColor: Colors.transparent,
+                              hoverColor: Colors.transparent,
+                              highlightColor: Colors.transparent,
+                              onTap: () async {
+                                Navigator.pop(context);
+
+                                context.pushNamed(
+                                    CDailyDashboardWidget.routeName);
+                              },
+                              child: Container(
+                                width: 260.0,
+                                height: 31.2,
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.only(
+                                    topLeft: Radius.circular(16.0),
+                                    topRight: Radius.circular(16.0),
+                                    bottomLeft: Radius.circular(16.0),
+                                    bottomRight: Radius.circular(16.0),
+                                  ),
+                                  border: Border.all(
+                                    color: Color(0xFFC5C4C4),
+                                  ),
                                 ),
-                                border: Border.all(
-                                  color: Color(0xFFC5C4C4),
-                                ),
-                              ),
-                              child: Align(
-                                alignment: AlignmentDirectional(0.0, 0.0),
-                                child: Text(
-                                  'Daily Dashboard',
-                                  style: FlutterFlowTheme.of(context)
-                                      .bodyMedium
-                                      .override(
-                                        font: GoogleFonts.nunito(
+                                child: Align(
+                                  alignment: AlignmentDirectional(0.0, 0.0),
+                                  child: Text(
+                                    'Daily Dashboard',
+                                    style: FlutterFlowTheme.of(context)
+                                        .bodyMedium
+                                        .override(
+                                          font: GoogleFonts.nunito(
+                                            fontWeight: FontWeight.w600,
+                                            fontStyle:
+                                                FlutterFlowTheme.of(context)
+                                                    .bodyMedium
+                                                    .fontStyle,
+                                          ),
+                                          color: Color(0xFF2D2F33),
+                                          fontSize: 18.0,
+                                          letterSpacing: 0.0,
                                           fontWeight: FontWeight.w600,
                                           fontStyle:
                                               FlutterFlowTheme.of(context)
                                                   .bodyMedium
                                                   .fontStyle,
                                         ),
-                                        color: Color(0xFF2D2F33),
-                                        fontSize: 18.0,
-                                        letterSpacing: 0.0,
-                                        fontWeight: FontWeight.w600,
-                                        fontStyle: FlutterFlowTheme.of(context)
-                                            .bodyMedium
-                                            .fontStyle,
-                                      ),
+                                  ),
                                 ),
                               ),
                             ),
@@ -665,8 +684,10 @@ class _NavMenuDirectoryWidgetState extends State<NavMenuDirectoryWidget> {
                             hoverColor: Colors.transparent,
                             highlightColor: Colors.transparent,
                             onTap: () async {
-                              context
-                                  .pushNamed(HWeeklySummaryReportWidget.routeName);
+                              Navigator.pop(context);
+
+                              context.pushNamed(
+                                  HWeeklySummaryReportWidget.routeName);
                             },
                             child: Text(
                               'Reports',
@@ -911,6 +932,8 @@ class _NavMenuDirectoryWidgetState extends State<NavMenuDirectoryWidget> {
                             hoverColor: Colors.transparent,
                             highlightColor: Colors.transparent,
                             onTap: () async {
+                              Navigator.pop(context);
+
                               context
                                   .pushNamed(SettingsAccountWidget.routeName);
                             },

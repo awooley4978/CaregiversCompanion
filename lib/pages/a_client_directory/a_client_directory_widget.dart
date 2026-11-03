@@ -403,7 +403,7 @@ class _AClientDirectoryWidgetState extends State<AClientDirectoryWidget> {
                               highlightColor: Colors.transparent,
                               onTap: () async {
                                 context
-                                    .goNamed(BCareProfileSetupWidget.routeName);
+                                    .pushNamed(BCareProfileSetupWidget.routeName);
                               },
                               child: Container(
                                 decoration: BoxDecoration(
@@ -602,7 +602,7 @@ class _AClientDirectoryWidgetState extends State<AClientDirectoryWidget> {
                                     hoverColor: Colors.transparent,
                                     highlightColor: Colors.transparent,
                                     onTap: () async {
-                                      context.goNamed(
+                                      context.pushNamed(
                                           HWeeklySummaryReportWidget.routeName);
                                     },
                                     child: Container(
