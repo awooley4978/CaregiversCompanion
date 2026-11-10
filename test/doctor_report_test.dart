@@ -368,6 +368,13 @@ void main() {
   group('range sheet', () {
     testWidgets('defaults to Last 30 days and pops the chosen range',
         (tester) async {
+      // Tall enough that the whole sheet (presets, button and the bounds line)
+      // is on screen, so both taps land on the control they name.
+      tester.view.physicalSize = const Size(1080.0, 2400.0);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
       CareReportRange? picked;
       await tester.pumpWidget(
         ChangeNotifierProvider<FFAppState>.value(
@@ -397,12 +404,15 @@ void main() {
       for (final preset in CareReportPreset.values) {
         expect(find.text(careReportPresetLabel(preset)), findsOneWidget);
       }
-      // The sheet opens on Last 30 days, so its bounds are the default period.
-      expect(find.text('5 Oct 2026 - 3 Nov 2026'), findsOneWidget);
+      // The sheet opens on Last 30 days, so the line under the button states
+      // the default period. It is matched with its 'Covers ' prefix on purpose:
+      // the Custom row carries its own date hint, so a bare '5 Oct 2026 - 3 Nov
+      // 2026' would match that hint and prove nothing about the chosen preset.
+      expect(find.text('Covers 5 Oct 2026 - 3 Nov 2026'), findsOneWidget);
 
       await tester.tap(find.text('Last 7 days'));
       await tester.pumpAndSettle();
-      expect(find.text('28 Oct 2026 - 3 Nov 2026'), findsOneWidget);
+      expect(find.text('Covers 28 Oct 2026 - 3 Nov 2026'), findsOneWidget);
 
       await tester.tap(find.text('Generate PDF'));
       await tester.pumpAndSettle();
