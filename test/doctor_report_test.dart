@@ -53,8 +53,10 @@ void main() {
     String name = 'Mom',
     String orgId = 'org_test',
   }) async {
+    // The careRecipients record stores the display name in the 'Name' field
+    // (schema field, not the Dart getter's name).
     await recipient(id).set({
-      'name': name,
+      'Name': name,
       'orgId': orgId,
     });
   }
@@ -396,11 +398,11 @@ void main() {
         expect(find.text(careReportPresetLabel(preset)), findsOneWidget);
       }
       // The sheet opens on Last 30 days, so its bounds are the default period.
-      expect(find.textContaining('5 Oct 2026 - 3 Nov 2026'), findsOneWidget);
+      expect(find.text('5 Oct 2026 - 3 Nov 2026'), findsOneWidget);
 
       await tester.tap(find.text('Last 7 days'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('28 Oct 2026 - 3 Nov 2026'), findsOneWidget);
+      expect(find.text('28 Oct 2026 - 3 Nov 2026'), findsOneWidget);
 
       await tester.tap(find.text('Generate PDF'));
       await tester.pumpAndSettle();
