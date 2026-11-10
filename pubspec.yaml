@@ -94,6 +94,11 @@ dependencies:
 dependency_overrides:
   http: 1.4.0
   uuid: ^4.0.0
+  # image 4.11.0+ calls `ZLibDecoder.decodeLazy`, which only exists in archive
+  # >= 4.4.0, but pdf 3.12.0 (the version our Flutter/Dart SDK resolves) caps
+  # archive at < 4.1.0 — so the transitive graph resolves an image that cannot
+  # compile. 4.10.2 is the newest image that works with archive 4.0.x.
+  image: 4.10.2
 
 dev_dependencies:
   flutter_lints: 4.0.0
