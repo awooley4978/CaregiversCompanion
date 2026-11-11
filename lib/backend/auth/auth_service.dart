@@ -127,6 +127,57 @@ Future<void> ensureUserProfile(User user, {String? displayName}) async {
   }
 }
 
+/// The signed-in caregiver's own identity, as shown on the Settings screen.
+///
+/// Both fields are the real values carried by the `users/{uid}` profile
+/// document ([ensureUserProfile]) — empty when the profile has not been
+/// provisioned yet or does not carry that field. Nothing here is a
+/// placeholder: callers render only what is non-empty.
+class UserProfile {
+  const UserProfile({this.name = '', this.email = ''});
+
+  final String name;
+  final String email;
+
+  bool get isEmpty => name.isEmpty && email.isEmpty;
+}
+
+/// Reads the `users/{uid}` profile record for [uid].
+///
+/// Returns null when there is nothing real to show: no uid, no profile read
+/// and no signed-in account details. Any field the profile document does not
+/// carry falls back to the signed-in Firebase Auth account (same uid only),
+/// which is the same source [ensureUserProfile] wrote the profile from.
+Future<UserProfile?> loadUserProfile(String uid) async {
+  if (uid.isEmpty) {
+    return null;
+  }
+  var name = '';
+  var email = '';
+  try {
+    final snapshot =
+        await FirebaseFirestore.instance.collection('users').doc(uid).get();
+    final data = snapshot.data();
+    name = (data?['name'] as String? ?? '').trim();
+    email = (data?['email'] as String? ?? '').trim();
+  } catch (_) {
+    // Unreadable profile (offline / rules): fall back to the auth account.
+  }
+  final authUser = FirebaseAuth.instance.currentUser;
+  if (authUser != null && authUser.uid == uid) {
+    if (name.isEmpty) {
+      name = (authUser.displayName ?? '').trim();
+    }
+    if (email.isEmpty) {
+      email = (authUser.email ?? '').trim();
+    }
+  }
+  if (name.isEmpty && email.isEmpty) {
+    return null;
+  }
+  return UserProfile(name: name, email: email);
+}
+
 /// Signs in with Google (the approved provider set: email/password + Google).
 ///
 /// Platform-aware:

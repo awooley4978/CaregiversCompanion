@@ -1,4 +1,5 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import '/backend/auth/auth_service.dart' show UserProfile, loadUserProfile;
 import '/components/button/button_widget.dart';
 import '/components/nav_menu_directory/nav_menu_directory_widget.dart';
 import '/components/settings_group/settings_group_widget.dart';
@@ -33,12 +34,61 @@ class _SettingsAccountWidgetState extends State<SettingsAccountWidget> {
 
   final scaffoldKey = GlobalKey<ScaffoldState>();
 
+  // The real signed-in caregiver's identity (U2): read from their own
+  // users/{uid} profile record. Empty until it loads (or when there is no
+  // profile to read) — the card then simply renders no name/email rather than
+  // inventing one.
+  String _profileName = '';
+  String _profileEmail = '';
+
   @override
   void initState() {
     super.initState();
     _model = createModel(context, () => SettingsAccountModel());
 
+    _loadProfile();
+
     WidgetsBinding.instance.addPostFrameCallback((_) => safeSetState(() {}));
+  }
+
+  Future<void> _loadProfile() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    UserProfile? profile;
+    try {
+      profile = await loadUserProfile(uid);
+    } catch (_) {
+      profile = null;
+    }
+    if (!mounted) {
+      return;
+    }
+    safeSetState(() {
+      _profileName = profile?.name ?? '';
+      _profileEmail = profile?.email ?? '';
+    });
+  }
+
+  /// Avatar initials from the real identity: the name's first two words, or
+  /// the email's local part when no name is on record. Empty when neither is
+  /// known (the circle then just stays empty — no placeholder letters).
+  String get _profileInitials {
+    final source = _profileName.isNotEmpty
+        ? _profileName
+        : (_profileEmail.contains('@')
+            ? _profileEmail.split('@').first
+            : _profileEmail);
+    final parts = source
+        .split(RegExp(r'[\s._\-]+'))
+        .where((part) => part.isNotEmpty)
+        .toList();
+    if (parts.isEmpty) {
+      return '';
+    }
+    String firstLetter(String value) => value.substring(0, 1).toUpperCase();
+    if (parts.length == 1) {
+      return firstLetter(parts.first);
+    }
+    return '${firstLetter(parts.first)}${firstLetter(parts[1])}';
   }
 
   @override
@@ -193,7 +243,7 @@ class _SettingsAccountWidgetState extends State<SettingsAccountWidget> {
                                 ),
                                 alignment: AlignmentDirectional(0.0, 0.0),
                                 child: Text(
-                                  'AR',
+                                  _profileInitials,
                                   textAlign: TextAlign.center,
                                   maxLines: 1,
                                   style: FlutterFlowTheme.of(context)
@@ -226,35 +276,51 @@ class _SettingsAccountWidgetState extends State<SettingsAccountWidget> {
                                   mainAxisAlignment: MainAxisAlignment.start,
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(
-                                      'Abbie Robinson',
-                                      style: FlutterFlowTheme.of(context)
-                                          .titleMedium
-                                          .override(
-                                            font: GoogleFonts.dmSans(
+                                    if (_profileName.isNotEmpty)
+                                      Text(
+                                        _profileName,
+                                        style: FlutterFlowTheme.of(context)
+                                            .titleMedium
+                                            .override(
+                                              font: GoogleFonts.dmSans(
+                                                fontWeight: FontWeight.bold,
+                                                fontStyle:
+                                                    FlutterFlowTheme.of(context)
+                                                        .titleMedium
+                                                        .fontStyle,
+                                              ),
+                                              color: FlutterFlowTheme.of(
+                                                      context)
+                                                  .primaryText,
+                                              letterSpacing: 0.0,
                                               fontWeight: FontWeight.bold,
                                               fontStyle:
                                                   FlutterFlowTheme.of(context)
                                                       .titleMedium
                                                       .fontStyle,
+                                              lineHeight: 1.45,
                                             ),
-                                            color: FlutterFlowTheme.of(context)
-                                                .primaryText,
-                                            letterSpacing: 0.0,
-                                            fontWeight: FontWeight.bold,
-                                            fontStyle:
-                                                FlutterFlowTheme.of(context)
-                                                    .titleMedium
-                                                    .fontStyle,
-                                            lineHeight: 1.45,
-                                          ),
-                                    ),
-                                    Text(
-                                      'abbie.r@example.com',
-                                      style: FlutterFlowTheme.of(context)
-                                          .bodySmall
-                                          .override(
-                                            font: GoogleFonts.nunito(
+                                      ),
+                                    if (_profileEmail.isNotEmpty)
+                                      Text(
+                                        _profileEmail,
+                                        style: FlutterFlowTheme.of(context)
+                                            .bodySmall
+                                            .override(
+                                              font: GoogleFonts.nunito(
+                                                fontWeight:
+                                                    FlutterFlowTheme.of(context)
+                                                        .bodySmall
+                                                        .fontWeight,
+                                                fontStyle:
+                                                    FlutterFlowTheme.of(context)
+                                                        .bodySmall
+                                                        .fontStyle,
+                                              ),
+                                              color:
+                                                  FlutterFlowTheme.of(context)
+                                                      .secondaryText,
+                                              letterSpacing: 0.0,
                                               fontWeight:
                                                   FlutterFlowTheme.of(context)
                                                       .bodySmall
@@ -263,21 +329,9 @@ class _SettingsAccountWidgetState extends State<SettingsAccountWidget> {
                                                   FlutterFlowTheme.of(context)
                                                       .bodySmall
                                                       .fontStyle,
+                                              lineHeight: 1.5,
                                             ),
-                                            color: FlutterFlowTheme.of(context)
-                                                .secondaryText,
-                                            letterSpacing: 0.0,
-                                            fontWeight:
-                                                FlutterFlowTheme.of(context)
-                                                    .bodySmall
-                                                    .fontWeight,
-                                            fontStyle:
-                                                FlutterFlowTheme.of(context)
-                                                    .bodySmall
-                                                    .fontStyle,
-                                            lineHeight: 1.5,
-                                          ),
-                                    ),
+                                      ),
                                     Padding(
                                       padding: EdgeInsetsDirectional.fromSTEB(
                                           0.0, 4.0, 0.0, 0.0),
