@@ -66,31 +66,9 @@ class _SettingsGroupChild3WidgetState extends State<SettingsGroupChild3Widget> {
             onTap: 'navigate:ClientProfiles',
           ),
         ),
-        Divider(
-          height: 16.0,
-          thickness: 1.0,
-          indent: 24.0,
-          endIndent: 0.0,
-          color: FlutterFlowTheme.of(context).alternate,
-        ),
-        wrapWithModel(
-          model: _model.settingsItemModel2,
-          updateCallback: () => safeSetState(() {}),
-          child: SettingsItemWidget(
-            hasSubtitle: false,
-            icon: Icon(
-              Icons.fingerprint_rounded,
-              color: FlutterFlowTheme.of(context).secondaryText,
-              size: 20.0,
-            ),
-            iconBg: FlutterFlowTheme.of(context).primaryBackground,
-            iconColor: FlutterFlowTheme.of(context).secondaryText,
-            label: 'Biometric Login',
-            showArrow: true,
-            subtitle: '3 people have access',
-            onTap: 'navigate:ClientProfiles',
-          ),
-        ),
+        // U2 (owner decision 2026-11-11): the "Biometric Login" row is hidden
+        // until it has real functionality — there is no biometric plugin or
+        // stored opt-in behind it. Only the Change Password row remains.
       ],
     );
   }
