@@ -339,3 +339,78 @@ String? authErrorMessage(Object error) {
   }
   return 'Something went wrong. Please try again.';
 }
+
+/// Shortest password the Change Password form accepts.
+///
+/// Firebase's own floor for Email/Password is 6 characters; the app asks for 8
+/// so a caregiver cannot pick a password weaker than the sign-up form allows.
+const int minNewPasswordLength = 8;
+
+/// Validates the Change Password form before anything is sent to Firebase.
+///
+/// Returns the message to show the caregiver, or null when the input can be
+/// submitted. Kept separate from [changePassword] so the rules are testable
+/// without touching the network.
+String? validateNewPassword({
+  required String currentPassword,
+  required String newPassword,
+  required String confirmPassword,
+}) {
+  if (currentPassword.isEmpty) {
+    return 'Enter your current password.';
+  }
+  if (newPassword.length < minNewPasswordLength) {
+    return 'Your new password must be at least $minNewPasswordLength characters.';
+  }
+  if (newPassword != confirmPassword) {
+    return 'The new passwords do not match.';
+  }
+  if (newPassword == currentPassword) {
+    return 'Choose a password different from your current one.';
+  }
+  return null;
+}
+
+/// Changes the signed-in caregiver's password with Firebase Auth
+/// (Email/Password) — a real change, not a reset email.
+///
+/// Firebase only lets a recently-signed-in account change its password, so the
+/// current password is used to re-authenticate first; that also means a typo
+/// in the current password fails cleanly here instead of silently doing
+/// nothing. Returns null on success, or the message to show on failure.
+Future<String?> changePassword({
+  required String currentPassword,
+  required String newPassword,
+}) async {
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) {
+    return 'You are not signed in. Sign in again to change your password.';
+  }
+  final email = (user.email ?? '').trim();
+  if (email.isEmpty) {
+    return 'This account has no email address, so its password cannot be '
+        'changed here.';
+  }
+  try {
+    await user.reauthenticateWithCredential(
+      EmailAuthProvider.credential(email: email, password: currentPassword),
+    );
+    await user.updatePassword(newPassword);
+    return null;
+  } on FirebaseAuthException catch (e) {
+    switch (e.code) {
+      case 'wrong-password':
+      case 'invalid-credential':
+        return 'Your current password is incorrect.';
+      case 'weak-password':
+        return 'Choose a stronger password.';
+      case 'requires-recent-login':
+        return 'Sign in again, then change your password.';
+      default:
+        return authErrorMessage(e) ??
+            'Could not change your password. Please try again.';
+    }
+  } catch (_) {
+    return 'Could not change your password. Please try again.';
+  }
+}

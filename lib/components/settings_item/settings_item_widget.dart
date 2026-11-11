@@ -19,6 +19,7 @@ class SettingsItemWidget extends StatefulWidget {
     bool? showArrow,
     String? subtitle,
     String? onTap,
+    this.onTapAction,
   })  : this.hasSubtitle = hasSubtitle ?? true,
         this.iconBg = iconBg ?? const Color(0x00000000),
         this.iconColor = iconColor ?? const Color(0x00000000),
@@ -35,6 +36,14 @@ class SettingsItemWidget extends StatefulWidget {
   final bool showArrow;
   final String subtitle;
   final String onTap;
+
+  /// The action a row performs when tapped, or null for a row that is inert.
+  ///
+  /// Rows without an action keep the export's behaviour exactly: no gesture
+  /// recognizer at all (e.g. "Terms of Service", which has no destination yet).
+  /// The `onTap` string above is the export's unused placeholder and is never
+  /// dispatched — nothing routes off it.
+  final VoidCallback? onTapAction;
 
   @override
   State<SettingsItemWidget> createState() => _SettingsItemWidgetState();
@@ -66,7 +75,8 @@ class _SettingsItemWidgetState extends State<SettingsItemWidget> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final onTapAction = widget.onTapAction;
+    final row = Container(
       child: Padding(
         padding: EdgeInsetsDirectional.fromSTEB(24.0, 16.0, 24.0, 16.0),
         child: Container(
@@ -167,6 +177,18 @@ class _SettingsItemWidgetState extends State<SettingsItemWidget> {
             ].divide(SizedBox(width: 16.0)),
           ),
         ),
+      ),
+    );
+    if (onTapAction == null) {
+      // Inert row: no InkWell, so a tap does nothing (unchanged export
+      // behaviour for rows with no real destination).
+      return row;
+    }
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTapAction,
+        child: row,
       ),
     );
   }
