@@ -48,31 +48,9 @@ class _SettingsGroupChild4WidgetState extends State<SettingsGroupChild4Widget> {
       mainAxisAlignment: MainAxisAlignment.start,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        wrapWithModel(
-          model: _model.settingsItemModel1,
-          updateCallback: () => safeSetState(() {}),
-          child: SettingsItemWidget(
-            hasSubtitle: false,
-            icon: Icon(
-              Icons.help_outline_rounded,
-              color: FlutterFlowTheme.of(context).secondaryText,
-              size: 20.0,
-            ),
-            iconBg: FlutterFlowTheme.of(context).primaryBackground,
-            iconColor: FlutterFlowTheme.of(context).secondaryText,
-            label: 'Help Center',
-            showArrow: true,
-            subtitle: '3 people have access',
-            onTap: 'navigate:ClientProfiles',
-          ),
-        ),
-        Divider(
-          height: 16.0,
-          thickness: 1.0,
-          indent: 24.0,
-          endIndent: 0.0,
-          color: FlutterFlowTheme.of(context).alternate,
-        ),
+        // U2 (owner decision 2026-11-11): the "Help Center" row is hidden until
+        // it has real functionality — no help/support destination exists and no
+        // URL has been supplied. Terms of Service stays (still pending a URL).
         wrapWithModel(
           model: _model.settingsItemModel2,
           updateCallback: () => safeSetState(() {}),
