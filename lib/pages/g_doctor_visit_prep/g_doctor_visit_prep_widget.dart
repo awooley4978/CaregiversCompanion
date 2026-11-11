@@ -1,4 +1,5 @@
 import '/components/button/button_widget.dart';
+import '/components/doctor_report_range_sheet/doctor_report_range_sheet_widget.dart';
 import '/components/nav_menu_directory/nav_menu_directory_widget.dart';
 import '/components/question_card/question_card_widget.dart';
 import '/components/symptom_log/symptom_log_widget.dart';
@@ -6,10 +7,13 @@ import '/flutter_flow/flutter_flow_icon_button.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/flutter_flow_widgets.dart';
+import '/reports/care_report.dart';
+import '/reports/care_report_pdf.dart';
 import 'dart:ui';
 import '/index.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 import 'g_doctor_visit_prep_model.dart';
 export 'g_doctor_visit_prep_model.dart';
@@ -29,6 +33,10 @@ class _GDoctorVisitPrepWidgetState extends State<GDoctorVisitPrepWidget> {
 
   final scaffoldKey = GlobalKey<ScaffoldState>();
 
+  /// True while the report is being read from Firestore and rendered, so the
+  /// Export button cannot be tapped twice and shows its loading state.
+  bool _exporting = false;
+
   @override
   void initState() {
     super.initState();
@@ -42,6 +50,75 @@ class _GDoctorVisitPrepWidgetState extends State<GDoctorVisitPrepWidget> {
     _model.dispose();
 
     super.dispose();
+  }
+
+  /// The 'Export' action: pick a range, then build a PDF from the recipient's
+  /// stored care records over that range and hand it to the platform print /
+  /// share sheet.
+  ///
+  /// Owner-approved spec (2026-11-03): the report covers a user-selected range
+  /// with presets, contains only records that were actually saved, and never
+  /// invents content. An empty period produces an honest no-records report; a
+  /// failed read is reported to the caregiver instead of producing a blank PDF.
+  Future<void> _exportReport(BuildContext context) async {
+    final recipientRef = FFAppState().selectedCareRecipient;
+    if (recipientRef == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Select a care recipient before exporting a report.'),
+        ),
+      );
+      return;
+    }
+
+    final range = await showModalBottomSheet<CareReportRange>(
+      isScrollControlled: true,
+      backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
+      context: context,
+      builder: (context) {
+        return GestureDetector(
+          onTap: () {
+            FocusScope.of(context).unfocus();
+            FocusManager.instance.primaryFocus?.unfocus();
+          },
+          child: Padding(
+            padding: MediaQuery.viewInsetsOf(context),
+            child: DoctorReportRangeSheetWidget(),
+          ),
+        );
+      },
+    );
+    if (range == null || !mounted) {
+      return;
+    }
+
+    safeSetState(() => _exporting = true);
+    try {
+      final report = await loadCareReportData(
+        recipientRef: recipientRef,
+        range: range,
+      );
+      final bytes = await buildCareReportPdf(report);
+      await Printing.layoutPdf(
+        name: careReportFileName(report),
+        onLayout: (format) async => bytes,
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Could not build the report. Please check your connection and '
+              'try again.',
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        safeSetState(() => _exporting = false);
+      }
+    }
   }
 
   @override
@@ -667,8 +744,9 @@ class _GDoctorVisitPrepWidgetState extends State<GDoctorVisitPrepWidget> {
                                       variant: 'secondary',
                                       size: 'medium',
                                       fullWidth: false,
-                                      loading: false,
-                                      disabled: false,
+                                      loading: _exporting,
+                                      disabled: _exporting,
+                                      onPressed: () => _exportReport(context),
                                     ),
                                   ),
                                 ].divide(SizedBox(width: 16.0)),
