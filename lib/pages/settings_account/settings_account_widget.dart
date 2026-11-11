@@ -1,6 +1,8 @@
 import 'package:firebase_auth/firebase_auth.dart';
-import '/backend/auth/auth_service.dart' show UserProfile, loadUserProfile;
+import '/backend/auth/auth_service.dart'
+    show UserProfile, loadUserProfile, saveOwnName;
 import '/components/button/button_widget.dart';
+import '/components/identity_edit_sheet/identity_edit_sheet.dart';
 import '/components/nav_menu_directory/nav_menu_directory_widget.dart';
 import '/components/settings_group/settings_group_widget.dart';
 import '/components/settings_group_child/settings_group_child_widget.dart';
@@ -66,6 +68,40 @@ class _SettingsAccountWidgetState extends State<SettingsAccountWidget> {
       _profileName = profile?.name ?? '';
       _profileEmail = profile?.email ?? '';
     });
+  }
+
+  /// Edits the signed-in caregiver's own name (the pencil on the identity
+  /// card): collects it in the standard modal sheet, writes it to their own
+  /// `users/{uid}` profile, then shows the new name and initials on the card.
+  /// A blank name never reaches the write (the sheet rejects it); a failed
+  /// write is reported as a real error and leaves the card as it was.
+  Future<void> _editName() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    if (uid.isEmpty) {
+      showSnackbar(context, 'Sign in again to edit your name.');
+      return;
+    }
+    final name = await showIdentityEditSheet(context, currentName: _profileName);
+    if (name == null || !mounted) {
+      return;
+    }
+    try {
+      await saveOwnName(uid, name);
+    } catch (_) {
+      if (mounted) {
+        showSnackbar(
+          context,
+          "Couldn't save your name. Please check your connection and try "
+          'again.',
+        );
+      }
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+    safeSetState(() => _profileName = name);
+    showSnackbar(context, 'Name updated.');
   }
 
   /// Avatar initials from the real identity: the name's first two words, or
@@ -403,8 +439,8 @@ class _SettingsAccountWidgetState extends State<SettingsAccountWidget> {
                                       .secondaryText,
                                   size: 20.0,
                                 ),
-                                onPressed: () {
-                                  print('IconButton pressed ...');
+                                onPressed: () async {
+                                  await _editName();
                                 },
                               ),
                             ].divide(SizedBox(width: 24.0)),

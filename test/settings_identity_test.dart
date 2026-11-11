@@ -10,6 +10,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:new_project/pages/settings_account/settings_account_widget.dart';
+import 'package:new_project/backend/auth/auth_service.dart' show loadUserProfile;
 import 'firebase_test_setup.dart';
 
 void main() {
@@ -83,5 +84,78 @@ void main() {
     // The card itself is still there, with its unchanged role chip.
     expect(find.text('Primary Caregiver'), findsOneWidget);
     expect(find.text('Settings & Account'), findsOneWidget);
+  });
+
+  // U2 edit identity (owner decision 2026-11-11): the pencil opens the edit
+  // sheet, saves the caregiver's OWN name to their `users/{uid}` profile, and
+  // the card then shows the new name and its initials.
+  testWidgets('the pencil saves the signed-in user\'s own name', (tester) async {
+    await seedProfile(
+      'u1',
+      name: 'Maria Alvarez',
+      email: 'maria.alvarez@example.com',
+    );
+    fakeAuthPlatform.emitSignedIn(
+      uid: 'u1',
+      email: 'maria.alvarez@example.com',
+      displayName: 'Maria Alvarez',
+    );
+
+    await pumpSettings(tester);
+    expect(find.text('Maria Alvarez'), findsOneWidget);
+    expect(find.text('MA'), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.edit_rounded));
+    await tester.pumpAndSettle();
+
+    // The standard modal sheet, prefilled with the current name.
+    expect(find.text('Edit your name'), findsOneWidget);
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).controller?.text,
+      'Maria Alvarez',
+    );
+
+    await tester.enterText(find.byType(TextField), '  Rosa Alvarez  ');
+    await tester.tap(find.text('Save name'));
+    await tester.pumpAndSettle();
+
+    // Written (trimmed) to the caregiver's own profile record.
+    final saved = await loadUserProfile('u1');
+    expect(saved?.name, 'Rosa Alvarez');
+
+    // The card updates: new name, new initials, sheet gone.
+    expect(find.text('Rosa Alvarez'), findsOneWidget);
+    expect(find.text('RA'), findsOneWidget);
+    expect(find.text('Maria Alvarez'), findsNothing);
+    expect(find.text('Edit your name'), findsNothing);
+  });
+
+  testWidgets('a blank name is rejected and nothing is written',
+      (tester) async {
+    await seedProfile(
+      'u1',
+      name: 'Maria Alvarez',
+      email: 'maria.alvarez@example.com',
+    );
+    fakeAuthPlatform.emitSignedIn(
+      uid: 'u1',
+      email: 'maria.alvarez@example.com',
+      displayName: 'Maria Alvarez',
+    );
+
+    await pumpSettings(tester);
+
+    await tester.tap(find.byIcon(Icons.edit_rounded));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), '   ');
+    await tester.tap(find.text('Save name'));
+    await tester.pumpAndSettle();
+
+    // Still open, with a real inline error, and the profile is untouched.
+    expect(find.text('Please enter your name.'), findsOneWidget);
+    expect(find.text('Edit your name'), findsOneWidget);
+    final saved = await loadUserProfile('u1');
+    expect(saved?.name, 'Maria Alvarez');
   });
 }

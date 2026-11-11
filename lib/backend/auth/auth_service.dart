@@ -178,6 +178,29 @@ Future<UserProfile?> loadUserProfile(String uid) async {
   return UserProfile(name: name, email: email);
 }
 
+/// Persists the signed-in caregiver's own display [name] on their `users/{uid}`
+/// profile record — the same self-service merge write the preferred-pharmacy
+/// setting uses (only the named field is written; `activeGroupId` and every
+/// other field are untouched, so the existing self-update rule governs this
+/// write and no rules change is needed).
+///
+/// Throws [ArgumentError] for an empty uid or a blank name so a caller can
+/// reject it before writing; any backend failure propagates to the caller so it
+/// can surface a real error instead of pretending the save worked.
+Future<void> saveOwnName(String uid, String name) async {
+  final trimmed = name.trim();
+  if (uid.isEmpty) {
+    throw ArgumentError('No signed-in user to save a name for.');
+  }
+  if (trimmed.isEmpty) {
+    throw ArgumentError('A name is required.');
+  }
+  await FirebaseFirestore.instance
+      .collection('users')
+      .doc(uid)
+      .set({'name': trimmed}, SetOptions(merge: true));
+}
+
 /// Signs in with Google (the approved provider set: email/password + Google).
 ///
 /// Platform-aware:
