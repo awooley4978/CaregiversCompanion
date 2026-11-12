@@ -1,6 +1,14 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import '/backend/auth/auth_service.dart'
     show UserProfile, loadUserProfile, saveOwnName;
+import '/backend/org/org_service.dart'
+    show
+        getActiveGroupId,
+        getMembership,
+        kRoleAdmin,
+        kRoleCaregiver,
+        kRoleOwner,
+        kRoleViewer;
 import '/components/button/button_widget.dart';
 import '/components/identity_edit_sheet/identity_edit_sheet.dart';
 import '/components/nav_menu_directory/nav_menu_directory_widget.dart';
@@ -42,15 +50,83 @@ class _SettingsAccountWidgetState extends State<SettingsAccountWidget> {
   String _profileName = '';
   String _profileEmail = '';
 
+  // The signed-in caregiver's role in their ACTIVE organization, read from
+  // `organizations/{activeGroupId}/members/{uid}.role` (the same membership
+  // doc the Household page reads). Null whenever it cannot be reliably
+  // determined — no signed-in user, no active org, no active membership, an
+  // absent/unrecognised role value, or a failed lookup. The card then shows
+  // NO badge rather than a wrong one.
+  String? _memberRole;
+
+  // The org context the current [_memberRole] was read for, so an app-state
+  // notification that is not an org switch does not trigger a re-read.
+  String? _roleOrgId;
+
   @override
   void initState() {
     super.initState();
     _model = createModel(context, () => SettingsAccountModel());
 
     _loadProfile();
+    _loadRole();
+
+    // Keep the badge accurate across org switches: `setActiveGroupId()`
+    // updates FFAppState().activeGroupId and notifies, which re-reads the
+    // role for the new active org.
+    FFAppState().addListener(_onAppStateChanged);
 
     WidgetsBinding.instance.addPostFrameCallback((_) => safeSetState(() {}));
   }
+
+  void _onAppStateChanged() {
+    final orgId = FFAppState().activeGroupId;
+    if (orgId == _roleOrgId) {
+      return;
+    }
+    _loadRole();
+  }
+
+  /// Reads the caregiver's role in the active org through the established
+  /// membership read path: `users/{uid}.activeGroupId` (cached in
+  /// FFAppState) → `getMembership(orgId, uid)` → `MembersRecord.role`.
+  /// `getMembership` returns null unless the member doc is `active`, so a
+  /// pending invite or a missing doc yields no badge.
+  Future<void> _loadRole() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    final orgId = FFAppState().activeGroupId;
+    _roleOrgId = orgId;
+    String? role;
+    if (uid.isNotEmpty) {
+      try {
+        final activeOrgId = orgId ?? await getActiveGroupId(uid);
+        if (activeOrgId != null && activeOrgId.isNotEmpty) {
+          final membership = await getMembership(activeOrgId, uid);
+          // `MembersRecord.role` defaults to 'viewer' when the field is
+          // missing; only an explicitly stored role counts here.
+          if (membership != null && membership.hasRole()) {
+            role = membership.role;
+          }
+        }
+      } catch (_) {
+        role = null;
+      }
+    }
+    if (!mounted) {
+      return;
+    }
+    safeSetState(() => _memberRole = role);
+  }
+
+  /// The badge text for a stored role value, using the same labels as the
+  /// Household page's role chip. Anything unrecognised maps to null (no
+  /// badge) — the badge never guesses a role.
+  String? get _roleLabel => switch (_memberRole) {
+        kRoleOwner => 'Owner',
+        kRoleAdmin => 'Admin',
+        kRoleCaregiver => 'Caregiver',
+        kRoleViewer => 'Viewer',
+        _ => null,
+      };
 
   Future<void> _loadProfile() async {
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
@@ -128,6 +204,7 @@ class _SettingsAccountWidgetState extends State<SettingsAccountWidget> {
 
   @override
   void dispose() {
+    FFAppState().removeListener(_onAppStateChanged);
     _model.dispose();
 
     super.dispose();
@@ -367,30 +444,47 @@ class _SettingsAccountWidgetState extends State<SettingsAccountWidget> {
                                               lineHeight: 1.5,
                                             ),
                                       ),
-                                    Padding(
-                                      padding: EdgeInsetsDirectional.fromSTEB(
-                                          0.0, 4.0, 0.0, 0.0),
-                                      child: Container(
+                                    if (_roleLabel != null)
+                                      Padding(
+                                        padding: EdgeInsetsDirectional.fromSTEB(
+                                            0.0, 4.0, 0.0, 0.0),
                                         child: Container(
-                                          decoration: BoxDecoration(
-                                            color: FlutterFlowTheme.of(context)
-                                                .primaryBackground,
-                                            borderRadius:
-                                                BorderRadius.circular(20.0),
-                                            shape: BoxShape.rectangle,
-                                          ),
-                                          child: Padding(
-                                            padding:
-                                                EdgeInsetsDirectional.fromSTEB(
-                                                    8.0, 4.0, 8.0, 4.0),
-                                            child: Container(
-                                              child: Text(
-                                                'Primary Caregiver',
-                                                style: FlutterFlowTheme.of(
-                                                        context)
-                                                    .labelSmall
-                                                    .override(
-                                                      font: GoogleFonts.nunito(
+                                          child: Container(
+                                            decoration: BoxDecoration(
+                                              color: FlutterFlowTheme.of(context)
+                                                  .primaryBackground,
+                                              borderRadius:
+                                                  BorderRadius.circular(20.0),
+                                              shape: BoxShape.rectangle,
+                                            ),
+                                            child: Padding(
+                                              padding:
+                                                  EdgeInsetsDirectional.fromSTEB(
+                                                      8.0, 4.0, 8.0, 4.0),
+                                              child: Container(
+                                                child: Text(
+                                                  _roleLabel!,
+                                                  style: FlutterFlowTheme.of(
+                                                          context)
+                                                      .labelSmall
+                                                      .override(
+                                                        font: GoogleFonts.nunito(
+                                                          fontWeight:
+                                                              FlutterFlowTheme.of(
+                                                                      context)
+                                                                  .labelSmall
+                                                                  .fontWeight,
+                                                          fontStyle:
+                                                              FlutterFlowTheme.of(
+                                                                      context)
+                                                                  .labelSmall
+                                                                  .fontStyle,
+                                                        ),
+                                                        color:
+                                                            FlutterFlowTheme.of(
+                                                                    context)
+                                                                .onSurface,
+                                                        letterSpacing: 0.0,
                                                         fontWeight:
                                                             FlutterFlowTheme.of(
                                                                     context)
@@ -401,24 +495,8 @@ class _SettingsAccountWidgetState extends State<SettingsAccountWidget> {
                                                                     context)
                                                                 .labelSmall
                                                                 .fontStyle,
+                                                        lineHeight: 1.3,
                                                       ),
-                                                      color:
-                                                          FlutterFlowTheme.of(
-                                                                  context)
-                                                              .onSurface,
-                                                      letterSpacing: 0.0,
-                                                      fontWeight:
-                                                          FlutterFlowTheme.of(
-                                                                  context)
-                                                              .labelSmall
-                                                              .fontWeight,
-                                                      fontStyle:
-                                                          FlutterFlowTheme.of(
-                                                                  context)
-                                                              .labelSmall
-                                                              .fontStyle,
-                                                      lineHeight: 1.3,
-                                                    ),
                                               ),
                                             ),
                                           ),

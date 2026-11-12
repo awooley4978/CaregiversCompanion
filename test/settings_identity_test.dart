@@ -5,10 +5,17 @@
 // Layout/styling are unchanged — only the avatar initials, name and email
 // values now come from the profile. The not-yet-loaded / unavailable case must
 // stay blank (no placeholder text, no invented name).
+//
+// The role chip on the same card shows the caregiver's role in their ACTIVE
+// organization (owner decision 2026-11-12, option A), read from
+// `organizations/{activeGroupId}/members/{uid}.role`. It is omitted entirely
+// when the role cannot be reliably determined — never guessed, never inferred
+// from ownership.
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:new_project/app_state.dart' show FFAppState;
 import 'package:new_project/pages/settings_account/settings_account_widget.dart';
 import 'package:new_project/backend/auth/auth_service.dart' show loadUserProfile;
 import 'firebase_test_setup.dart';
@@ -22,21 +29,49 @@ void main() {
 
   setUp(() {
     fakeFirestore.clear();
+    // The org context is cached app-wide; each test starts with no org.
+    FFAppState().activeGroupId = null;
   });
 
   Future<void> seedProfile(
     String uid, {
     String? name,
     String? email,
+    String? activeGroupId,
   }) async {
     await FirebaseFirestore.instance.collection('users').doc(uid).set({
       'uid': uid,
       if (name != null) 'name': name,
       if (email != null) 'email': email,
+      if (activeGroupId != null) 'activeGroupId': activeGroupId,
+    });
+  }
+
+  /// The membership doc the Household page (and the app-layer membership
+  /// check) reads: `organizations/{orgId}/members/{uid}`.
+  Future<void> seedMembership(
+    String orgId,
+    String uid, {
+    String? role,
+    String status = 'active',
+  }) async {
+    await FirebaseFirestore.instance
+        .collection('organizations')
+        .doc(orgId)
+        .collection('members')
+        .doc(uid)
+        .set({
+      'uid': uid,
+      'orgId': orgId,
+      if (role != null) 'role': role,
+      'status': status,
     });
   }
 
   Future<void> pumpSettings(WidgetTester tester) async {
+    // Force a fresh State (and therefore a fresh role read) each time: pumping
+    // the same widget type twice would otherwise reuse the existing State.
+    await tester.pumpWidget(const SizedBox());
     await tester.pumpWidget(
       const MaterialApp(home: SettingsAccountWidget()),
     );
@@ -81,9 +116,101 @@ void main() {
     expect(find.text('Abbie Robinson'), findsNothing);
     expect(find.text('abbie.r@example.com'), findsNothing);
     expect(find.text('AR'), findsNothing);
-    // The card itself is still there, with its unchanged role chip.
-    expect(find.text('Primary Caregiver'), findsOneWidget);
+    // The card itself is still there, but with NO role badge: there is no
+    // active org and no membership to read, so the old hardcoded
+    // "Primary Caregiver" chip (and any other guess) must be gone.
+    expect(find.text('Primary Caregiver'), findsNothing);
+    expect(find.text('Caregiver'), findsNothing);
+    expect(find.text('Owner'), findsNothing);
     expect(find.text('Settings & Account'), findsOneWidget);
+  });
+
+  // Role badge (owner decision 2026-11-12, option A): the chip shows the
+  // caregiver's REAL role in their active organization, using the Household
+  // page's labels — and never "Primary Caregiver".
+  testWidgets('the role chip shows the active org role, not "Primary Caregiver"',
+      (tester) async {
+    await seedProfile('u1', name: 'Maria Alvarez', activeGroupId: 'org_a');
+    await seedMembership('org_a', 'u1', role: 'owner');
+    fakeAuthPlatform.emitSignedIn(uid: 'u1');
+
+    await pumpSettings(tester);
+
+    expect(find.text('Owner'), findsOneWidget);
+    expect(find.text('Primary Caregiver'), findsNothing);
+  });
+
+  testWidgets('every Household role label is used verbatim', (tester) async {
+    fakeAuthPlatform.emitSignedIn(uid: 'u1');
+    const expected = {
+      'owner': 'Owner',
+      'admin': 'Admin',
+      'caregiver': 'Caregiver',
+      'viewer': 'Viewer',
+    };
+    for (final entry in expected.entries) {
+      fakeFirestore.clear();
+      await seedProfile('u1', name: 'Maria Alvarez', activeGroupId: 'org_a');
+      await seedMembership('org_a', 'u1', role: entry.key);
+
+      await pumpSettings(tester);
+
+      expect(find.text(entry.value), findsOneWidget,
+          reason: 'role ${entry.key} should render as ${entry.value}');
+    }
+  });
+
+  testWidgets('no badge when the role cannot be determined', (tester) async {
+    // (a) membership doc exists but stores no role — MembersRecord.role
+    // defaults to 'viewer'; that default must NOT leak into the badge.
+    await seedProfile('u1', name: 'Maria Alvarez', activeGroupId: 'org_a');
+    await seedMembership('org_a', 'u1');
+    fakeAuthPlatform.emitSignedIn(uid: 'u1');
+
+    await pumpSettings(tester);
+    expect(find.text('Viewer'), findsNothing);
+    expect(find.text('Caregiver'), findsNothing);
+    expect(find.text('Owner'), findsNothing);
+    expect(find.text('Primary Caregiver'), findsNothing);
+
+    // (b) the member doc is only an invite, not an active membership.
+    fakeFirestore.clear();
+    await seedProfile('u1', name: 'Maria Alvarez', activeGroupId: 'org_a');
+    await seedMembership('org_a', 'u1', role: 'owner', status: 'invited');
+
+    await pumpSettings(tester);
+    expect(find.text('Owner'), findsNothing);
+    expect(find.text('Primary Caregiver'), findsNothing);
+
+    // (c) an unrecognised role value is not translated into a guess.
+    fakeFirestore.clear();
+    await seedProfile('u1', name: 'Maria Alvarez', activeGroupId: 'org_a');
+    await seedMembership('org_a', 'u1', role: 'superuser');
+
+    await pumpSettings(tester);
+    expect(find.text('Caregiver'), findsNothing);
+    expect(find.text('Primary Caregiver'), findsNothing);
+  });
+
+  // Org switching: the chip must follow the active org, never show the
+  // previous org's role.
+  testWidgets('the role chip refreshes when the active org changes',
+      (tester) async {
+    await seedProfile('u1', name: 'Maria Alvarez', activeGroupId: 'org_a');
+    await seedMembership('org_a', 'u1', role: 'caregiver');
+    await seedMembership('org_b', 'u1', role: 'admin');
+    fakeAuthPlatform.emitSignedIn(uid: 'u1');
+    FFAppState().activeGroupId = 'org_a';
+
+    await pumpSettings(tester);
+    expect(find.text('Caregiver'), findsOneWidget);
+
+    // setActiveGroupId() updates the cached context and notifies.
+    FFAppState().activeGroupId = 'org_b';
+    await tester.pumpAndSettle();
+
+    expect(find.text('Admin'), findsOneWidget);
+    expect(find.text('Caregiver'), findsNothing);
   });
 
   // U2 edit identity (owner decision 2026-11-11): the pencil opens the edit
