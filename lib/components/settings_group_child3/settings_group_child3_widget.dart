@@ -1,3 +1,4 @@
+import '/components/change_password_sheet/change_password_sheet_widget.dart';
 import '/components/settings_item/settings_item_widget.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
@@ -64,6 +65,7 @@ class _SettingsGroupChild3WidgetState extends State<SettingsGroupChild3Widget> {
             showArrow: true,
             subtitle: '3 people have access',
             onTap: 'navigate:ClientProfiles',
+            onTapAction: () => showChangePasswordSheet(context),
           ),
         ),
         // U2 (owner decision 2026-11-11): the "Biometric Login" row is hidden

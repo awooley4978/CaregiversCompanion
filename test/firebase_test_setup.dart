@@ -102,16 +102,27 @@ class FakeFirebaseAuthPlatform extends FirebaseAuthPlatform {
   }
 
   /// Test helper: sign a user in (with [uid], [email], [displayName]).
+  ///
+  /// [password] is the password the fake accepts when the app re-authenticates
+  /// the user (the Change Password flow). Null accepts any password, which
+  /// keeps tests that never touch passwords unchanged.
   void emitSignedIn({
     String uid = 'test-user-1',
     String? email,
     String? displayName,
+    String? password,
   }) {
-    _currentUser = _makeUser(uid, email: email, displayName: displayName);
+    final user = _makeUser(uid, email: email, displayName: displayName);
+    user.password = password;
+    _currentUser = user;
     _authStateController.add(_currentUser);
   }
 
-  UserPlatform _makeUser(String uid, {String? email, String? displayName}) {
+  /// Test helper: the fake account behind the signed-in user (its recorded
+  /// re-authentication and password-update calls are readable from here).
+  FakeUserPlatform get signedInUser => _currentUser! as FakeUserPlatform;
+
+  FakeUserPlatform _makeUser(String uid, {String? email, String? displayName}) {
     final details = PigeonUserDetails(
       userInfo: PigeonUserInfo(
         uid: uid,
@@ -128,7 +139,77 @@ class FakeFirebaseAuthPlatform extends FirebaseAuthPlatform {
 
 class FakeUserPlatform extends UserPlatform {
   FakeUserPlatform(super.auth, super.multiFactor, super.user);
+
+  /// Test helper: the password re-authentication accepts (null = any).
+  String? password;
+
+  /// Test helper: when set, re-authentication throws this error.
+  Object? reauthError;
+
+  /// Test helper: when set, the password update throws this error.
+  Object? updatePasswordError;
+
+  /// Test helper: passwords the app re-authenticated with.
+  final List<String> reauthPasswords = [];
+
+  /// Test helper: passwords the app actually set.
+  final List<String> updatedPasswords = [];
+
+  @override
+  Future<UserCredentialPlatform> reauthenticateWithCredential(
+      AuthCredential credential) async {
+    final error = reauthError;
+    if (error != null) {
+      throw error;
+    }
+    final attempted = credential.asMap()['secret'] ?? '';
+    reauthPasswords.add(attempted);
+    final expected = password;
+    if (expected != null && attempted != expected) {
+      throw fakeAuthException(
+        'wrong-password',
+        'The password is invalid or the user does not have a password.',
+      );
+    }
+    return FakeUserCredentialPlatform(
+      auth: auth,
+      user: this,
+      credential: credential,
+    );
+  }
+
+  @override
+  Future<void> updatePassword(String newPassword) async {
+    final error = updatePasswordError;
+    if (error != null) {
+      throw error;
+    }
+    updatedPasswords.add(newPassword);
+  }
 }
+
+/// A concrete [UserCredentialPlatform] (the platform base is abstract), so the
+/// auth fake can return a credential from re-authentication.
+class FakeUserCredentialPlatform extends UserCredentialPlatform {
+  FakeUserCredentialPlatform({
+    required super.auth,
+    super.user,
+    super.credential,
+  });
+}
+
+/// A [FirebaseAuthException] the auth fake can throw.
+///
+/// The real constructor is `@protected`, so it is reached through this
+/// subclass rather than called directly from a test.
+class FakeAuthException extends FirebaseAuthException {
+  FakeAuthException(String code, [String? message])
+      : super(code: code, message: message);
+}
+
+/// Builds a [FirebaseAuthException] with [code] for the auth fake to throw.
+FirebaseAuthException fakeAuthException(String code, [String? message]) =>
+    FakeAuthException(code, message);
 
 class FakeMultiFactorPlatform extends MultiFactorPlatform {
   FakeMultiFactorPlatform(super.auth);
