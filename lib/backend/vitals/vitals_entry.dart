@@ -91,7 +91,7 @@ class VitalsValidation {
   bool get isValid => draft != null;
 }
 
-String _blankToNull(String? value) {
+String? _blankToNull(String? value) {
   final trimmed = (value ?? '').trim();
   return trimmed.isEmpty ? null : trimmed;
 }
