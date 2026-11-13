@@ -191,27 +191,22 @@ Future<String> ensureOrgMembership(User user) async {
   //    still backed by an active membership (a stale context after removal
   //    must not be trusted on its own — D1: context is never authorization).
   // E1: fast-path getActiveGroupId.
+  // Errors are surfaced to the caller via SaveStepException (step + cause);
+  // nothing here logs the uid, orgId or document ids.
   try {
-    print('SAVE-STEP E1 getActiveGroupId: uid=$uid');
     final activeGroupId = await getActiveGroupId(uid);
-    print('SAVE-STEP E1 getActiveGroupId -> activeGroupId=$activeGroupId');
     if (activeGroupId != null && activeGroupId.isNotEmpty) {
       // E2: verify that group context is backed by an active membership.
       try {
-        print('SAVE-STEP E2 isActiveMember: orgId=$activeGroupId uid=$uid');
         final ok = await isActiveMember(activeGroupId, uid);
-        print('SAVE-STEP E2 isActiveMember -> $ok');
         if (ok) {
-          print('SAVE-STEP E2 fast-path RETURN orgId=$activeGroupId');
           return activeGroupId;
         }
       } on FirebaseException catch (e) {
-        print('SAVE-STEP E2 FAILED: ${e.code} — ${e.message}');
         throw SaveStepException('E2', e);
       }
     }
   } on FirebaseException catch (e) {
-    print('SAVE-STEP E1 FAILED: ${e.code} — ${e.message}');
     throw SaveStepException('E1', e);
   }
 
@@ -219,18 +214,12 @@ Future<String> ensureOrgMembership(User user) async {
   //    a. Our own deterministic family org (the common case).
   final ownOrgId = autoFamilyOrgId(uid);
   try {
-    print('SAVE-STEP E2 isActiveMember: orgId=$ownOrgId uid=$uid');
     if (await isActiveMember(ownOrgId, uid)) {
-      print('SAVE-STEP E2 isActiveMember -> true');
       // E6: users/{uid} set-merge (activeGroupId).
-      print('SAVE-STEP E6 users set-merge activeGroupId=$ownOrgId');
       await usersDoc.set({'activeGroupId': ownOrgId}, SetOptions(merge: true));
-      print('SAVE-STEP E6 users set-merge -> OK RETURN orgId=$ownOrgId');
       return ownOrgId;
     }
-    print('SAVE-STEP E2 isActiveMember -> false');
   } on FirebaseException catch (e) {
-    print('SAVE-STEP E2 FAILED: ${e.code} — ${e.message}');
     throw SaveStepException('E2', e);
   }
 
@@ -242,7 +231,6 @@ Future<String> ensureOrgMembership(User user) async {
 
   try {
     // E4: org doc first (two sequential writes, not a batch — see above).
-    print('SAVE-STEP E4 org create: orgId=$orgId');
     await orgRef.set({
       ...createOrganizationsRecordData(
         name: kFamilyOrgName,
@@ -251,10 +239,8 @@ Future<String> ensureOrgMembership(User user) async {
       ),
       'createdAt': FieldValue.serverTimestamp(),
     });
-    print('SAVE-STEP E4 org create -> OK');
 
     // E5: founder membership second (org doc visible to rules by now).
-    print('SAVE-STEP E5 member create: orgId=$orgId uid=$uid');
     await orgRef.collection('members').doc(uid).set({
       ...createMembersRecordData(
         uid: uid,
@@ -270,14 +256,10 @@ Future<String> ensureOrgMembership(User user) async {
       ),
       'joinedAt': FieldValue.serverTimestamp(),
     });
-    print('SAVE-STEP E5 member create -> OK');
 
     // E6: set the group context (merge — never clobber the profile).
-    print('SAVE-STEP E6 users set-merge activeGroupId=$orgId');
     await usersDoc.set({'activeGroupId': orgId}, SetOptions(merge: true));
-    print('SAVE-STEP E6 users set-merge -> OK RETURN orgId=$orgId');
   } on FirebaseException catch (e) {
-    print('SAVE-STEP E4/E5/E6 FAILED: ${e.code} — ${e.message}');
     throw SaveStepException('E4/E5/E6', e);
   }
 
@@ -464,34 +446,26 @@ Future<DocumentReference<Map<String, dynamic>>> createCareRecipientForActiveGrou
   final String orgId;
   try {
     // S1: getActiveGroupId (fresh read of users/{uid}.activeGroupId).
-    print('SAVE-STEP S1 getActiveGroupId: uid=$uid');
     final existing = await getActiveGroupId(uid);
-    print('SAVE-STEP S1 getActiveGroupId -> activeGroupId=$existing');
     if (existing != null && existing.isNotEmpty) {
       orgId = existing;
     } else {
       // S2: ensureOrgMembership (restore an existing org/membership, or
       // provision a new family org on genuine first sign-in).
-      print('SAVE-STEP S2 ensureOrgMembership: uid=$uid (activeGroupId missing)');
       orgId = await ensureOrgMembership(user);
-      print('SAVE-STEP S2 ensureOrgMembership -> orgId=$orgId');
     }
   } on FirebaseException catch (e) {
-    print('SAVE-STEP S1/S2 FAILED: ${e.code} — ${e.message}');
     throw SaveStepException('S1/S2', e);
   }
   try {
     // S3: isActiveMember — verify active membership in [orgId] BEFORE write.
-    print('SAVE-STEP S3 isActiveMember: orgId=$orgId uid=$uid');
     final active = await isActiveMember(orgId, uid);
-    print('SAVE-STEP S3 isActiveMember -> $active');
     if (!active) {
       throw OrgAccessDeniedException(
           'Your membership in this care circle could not be verified, so the '
           'profile was not saved.');
     }
   } on FirebaseException catch (e) {
-    print('SAVE-STEP S3 FAILED: ${e.code} — ${e.message}');
     throw SaveStepException('S3', e);
   }
   try {
@@ -499,7 +473,6 @@ Future<DocumentReference<Map<String, dynamic>>> createCareRecipientForActiveGrou
     // (NOT the record's raw-typed `collection` getter) so the reference is
     // DocumentReference<Map<String, dynamic>> and matches the declared type.
     final ref = FirebaseFirestore.instance.collection('careRecipients').doc();
-    print('SAVE-STEP S4 careRecipients.create: orgId=$orgId docId=${ref.id}');
     await ref.set({
       ...data,
       'orgId': orgId,
@@ -508,10 +481,8 @@ Future<DocumentReference<Map<String, dynamic>>> createCareRecipientForActiveGrou
       // one-time claim script (scripts/claim_legacy_data.dart).
       'migrationStatus': kMigrationStatusCreated,
     });
-    print('SAVE-STEP S4 careRecipients.create -> OK docId=${ref.id}');
     return ref;
   } on FirebaseException catch (e) {
-    print('SAVE-STEP S4 FAILED: ${e.code} — ${e.message}');
     throw SaveStepException('S4', e);
   }
 }
