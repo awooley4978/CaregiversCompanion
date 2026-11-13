@@ -440,6 +440,58 @@ service cloud.firestore {
     }
 
     // ---------------------------------------------------------------------------
+    // vitalLogs — enabled 2026-11-13 (owner-approved v2 design, proposal
+    // vitals-rules-proposal-v2-2026-11-13.md §2). Ref-linked via careRecipientRef.
+    // Was a dead collection with an explicit deny; the block below is that one
+    // deny line replaced by the recipient-scoped gate.
+    //
+    // READS are recipient-scoped for BOTH get and list: the same full
+    // canAccessRecipientRef gate (within-org kind-branched + grantee share +
+    // caregiver/viewer assignment). A get() inside a LIST rule resolves fine
+    // here BECAUSE the app's query must constrain careRecipientRef — that is
+    // what makes this read recipient-scoped and query-compatible at once.
+    // CONSEQUENCE: there is no org-wide / all-recipients vitals query. A bare
+    // collection list, or a `where('orgId', ==)` only query, is DENIED. The
+    // vitals screen and the (deferred) doctor report must filter
+    // `where('careRecipientRef', == selectedRecipient)`.
+    //
+    // WRITES: create requires an orgId strictly matching the recipient's own
+    // org, a non-future logDateTime, and loggedByUid == the caller. orgId,
+    // loggedByUid and careRecipientRef are immutable on update; logDateTime is
+    // re-validated. Edits/deletes are the author's, or an owner/admin of the
+    // recipient's org — resolved from careRecipientRef, never from the stored
+    // orgId, so a stale orgId can never be used to escalate.
+    // ---------------------------------------------------------------------------
+    match /vitalLogs/{docId} {
+      allow get:    if canAccessRecipientRef(get(resource.data.careRecipientRef).id);
+      allow list:   if canAccessRecipientRef(get(resource.data.careRecipientRef).id);
+
+      allow create: if request.resource.data.careRecipientRef is path
+        && request.resource.data.orgId is string
+        && request.resource.data.logDateTime is timestamp
+        && request.resource.data.logDateTime <= request.time
+        && request.resource.data.loggedByUid == request.auth.uid
+        && canWriteRecipientData(get(request.resource.data.careRecipientRef).id)
+        && request.resource.data.orgId
+             == recipientOrgId(get(request.resource.data.careRecipientRef).id);
+
+      allow update: if canWriteRecipientData(get(resource.data.careRecipientRef).id)
+        && request.resource.data.careRecipientRef == resource.data.careRecipientRef
+        && request.resource.data.orgId == resource.data.orgId
+        && request.resource.data.loggedByUid == resource.data.loggedByUid
+        && request.resource.data.logDateTime is timestamp
+        && request.resource.data.logDateTime <= request.time
+        && ( resource.data.loggedByUid == request.auth.uid
+             || memberHasRole(recipientOrgId(get(resource.data.careRecipientRef).id),
+                              ['owner', 'admin']) );
+
+      allow delete: if canWriteRecipientData(get(resource.data.careRecipientRef).id)
+        && ( resource.data.loggedByUid == request.auth.uid
+             || memberHasRole(recipientOrgId(get(resource.data.careRecipientRef).id),
+                              ['owner', 'admin']) );
+    }
+
+    // ---------------------------------------------------------------------------
     // Dead collections (Q10/Q13 — explicit deny until their domains are wired).
     // Zero live data today, zero UI readers/writers; owner-only would silently
     // allow future un-audited writes through old code paths. When a domain gets
@@ -447,7 +499,6 @@ service cloud.firestore {
     // collections — a one-block swap. The emerencyinfo typo is RETAINED (§5.4).
     // ---------------------------------------------------------------------------
     match /emerencyinfo/{docId}  { allow read, write: if false; }
-    match /vitalLogs/{docId}     { allow read, write: if false; }
     match /appointments/{docId}  { allow read, write: if false; }
     match /dashboardNotes/{docId}{ allow read, write: if false; }
     match /iconname/{docId}      { allow read, write: if false; }
