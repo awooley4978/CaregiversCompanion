@@ -303,20 +303,6 @@ class _DMedicationTrackerWidgetState extends State<DMedicationTrackerWidget> {
                           lineHeight: 1.5,
                         ),
                       ),
-                      Text(
-                        'See All',
-                        style: theme.labelLarge.override(
-                          font: GoogleFonts.nunito(
-                            fontWeight: theme.labelLarge.fontWeight,
-                            fontStyle: theme.labelLarge.fontStyle,
-                          ),
-                          color: theme.onSurface,
-                          letterSpacing: 0.0,
-                          fontWeight: theme.labelLarge.fontWeight,
-                          fontStyle: theme.labelLarge.fontStyle,
-                          lineHeight: 1.4,
-                        ),
-                      ),
                     ],
                   ),
                   if (refills.isEmpty)
