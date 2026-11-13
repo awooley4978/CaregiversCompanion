@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart' show Timestamp;
 import 'package:collection/collection.dart';
 
 import '/backend/schema/util/firestore_util.dart';
@@ -78,6 +79,16 @@ class VitalLogsRecord extends FirestoreRecord {
   String get notes => _notes ?? '';
   bool hasNotes() => _notes != null;
 
+  // "orgId" field.
+  String? _orgId;
+  String get orgId => _orgId ?? '';
+  bool hasOrgId() => _orgId != null;
+
+  // "loggedByUid" field.
+  String? _loggedByUid;
+  String get loggedByUid => _loggedByUid ?? '';
+  bool hasLoggedByUid() => _loggedByUid != null;
+
   // "createdAt" field.
   String? _createdAt;
   String get createdAt => _createdAt ?? '';
@@ -102,6 +113,8 @@ class VitalLogsRecord extends FirestoreRecord {
     _weight = castToType<double>(snapshotData['weight']);
     _painLevel = castToType<int>(snapshotData['painLevel']);
     _notes = snapshotData['notes'] as String?;
+    _orgId = castToType<String>(snapshotData['orgId']);
+    _loggedByUid = castToType<String>(snapshotData['loggedByUid']);
     // createdAt/updatedAt are String-typed in this legacy model, but a doc may
     // hold a Firestore Timestamp instead (mapFromFirestore turns it into a
     // DateTime before it reaches here). A hard cast would throw, and
@@ -158,13 +171,18 @@ Map<String, dynamic> createVitalLogsRecordData({
   double? weight,
   int? painLevel,
   String? notes,
+  String? orgId,
+  String? loggedByUid,
   String? createdAt,
   String? updatedAt,
 }) {
   final firestoreData = mapToFirestore(
     <String, dynamic>{
       'careRecipientRef': careRecipientRef,
-      'logDateTime': logDateTime,
+      // The security rules require `logDateTime` to be a real timestamp, so it
+      // is converted here rather than relying on the value's Dart type.
+      'logDateTime':
+          logDateTime == null ? null : Timestamp.fromDate(logDateTime),
       'bloodPressureSystolic': bloodPressureSystolic,
       'bloodPressureDiastolic': bloodPressureDiastolic,
       'heartRate': heartRate,
@@ -174,6 +192,8 @@ Map<String, dynamic> createVitalLogsRecordData({
       'weight': weight,
       'painLevel': painLevel,
       'notes': notes,
+      'orgId': orgId,
+      'loggedByUid': loggedByUid,
       'createdAt': createdAt,
       'updatedAt': updatedAt,
     }.withoutNulls,
@@ -198,6 +218,8 @@ class VitalLogsRecordDocumentEquality implements Equality<VitalLogsRecord> {
         e1?.weight == e2?.weight &&
         e1?.painLevel == e2?.painLevel &&
         e1?.notes == e2?.notes &&
+        e1?.orgId == e2?.orgId &&
+        e1?.loggedByUid == e2?.loggedByUid &&
         e1?.createdAt == e2?.createdAt &&
         e1?.updatedAt == e2?.updatedAt;
   }
@@ -215,6 +237,8 @@ class VitalLogsRecordDocumentEquality implements Equality<VitalLogsRecord> {
         e?.weight,
         e?.painLevel,
         e?.notes,
+        e?.orgId,
+        e?.loggedByUid,
         e?.createdAt,
         e?.updatedAt
       ]);
