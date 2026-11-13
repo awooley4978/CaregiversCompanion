@@ -372,8 +372,12 @@ dynamic _dig(Map<String, dynamic> map, FieldPath path) {
 
 /// Ensure the standard query parameter keys exist, mirroring
 /// QueryPlatform._initialParameters (which only applies when params is null).
+/// The app-facing Query reads `parameters['where']` and
+/// `parameters['orderBy']` before delegating, so both lists must exist from
+/// construction (and must be growable, since the app-facing query appends).
 void _seedDefaults(Map<String, dynamic>? params) {
   params?['where'] ??= <List<List<dynamic>>>[];
+  params?['orderBy'] ??= <List<dynamic>>[];
 }
 
 class _MemoryDocumentReference extends DocumentReferencePlatform {
@@ -453,6 +457,10 @@ class _MemoryCollectionReference extends CollectionReferencePlatform {
       _MemoryQuery.from(this, limit: limit);
 
   @override
+  QueryPlatform orderBy(Iterable<List<dynamic>> orders) =>
+      _MemoryQuery.from(this, extraOrders: orders);
+
+  @override
   Future<QuerySnapshotPlatform> get(
       [GetOptions options = const GetOptions()]) async {
     return _MemoryQuery.from(this)._run();
@@ -488,13 +496,21 @@ class _MemoryQuery extends QueryPlatform {
   final String? collectionGroupId;
 
   factory _MemoryQuery.from(QueryPlatform other,
-      {List<List<dynamic>> extraConditions = const [], int? limit}) {
+      {List<List<dynamic>> extraConditions = const [],
+      Iterable<List<dynamic>> extraOrders = const [],
+      int? limit}) {
     final params = Map<String, dynamic>.from(other.parameters);
     if (extraConditions.isNotEmpty) {
       final conditions =
           List<List<dynamic>>.from(params['where'] as List? ?? const [])
             ..addAll(extraConditions);
       params['where'] = conditions;
+    }
+    if (extraOrders.isNotEmpty) {
+      final orders =
+          List<List<dynamic>>.from(params['orderBy'] as List? ?? const [])
+            ..addAll(extraOrders);
+      params['orderBy'] = orders;
     }
     if (limit != null) {
       params['limit'] = limit;
@@ -515,6 +531,10 @@ class _MemoryQuery extends QueryPlatform {
       _MemoryQuery.from(this, extraConditions: conditions);
 
   @override
+  QueryPlatform orderBy(Iterable<List<dynamic>> orders) =>
+      _MemoryQuery.from(this, extraOrders: orders);
+
+  @override
   QueryPlatform limit(int limit) => _MemoryQuery.from(this, limit: limit);
 
   @override
@@ -531,7 +551,8 @@ class _MemoryQuery extends QueryPlatform {
     return Stream<QuerySnapshotPlatform>.value(_runSync());
   }
 
-  /// Documents matching the query, as (path, data) entries.
+  /// Documents matching the query, as (path, data) entries, in `orderBy`
+  /// order (when the query has one).
   List<MapEntry<String, Map<String, dynamic>>> _matches() {
     Iterable<MapEntry<String, Map<String, dynamic>>> candidates;
     if (collectionGroupId != null) {
@@ -540,13 +561,76 @@ class _MemoryQuery extends QueryPlatform {
       candidates = _store._docsInCollection(basePath!);
     }
     final conditions = (parameters['where'] as List?) ?? const [];
-    var result = candidates.where((entry) =>
-        conditions.every((c) => _matchesCondition(entry, c)));
+    final result = candidates
+        .where((entry) => conditions.every((c) => _matchesCondition(entry, c)))
+        .toList();
+
+    final orders = (parameters['orderBy'] as List?) ?? const [];
+    var ordered = result;
+    if (orders.isNotEmpty) {
+      // Like real Firestore, a document that lacks an orderBy field is not
+      // part of the result at all.
+      ordered = result
+          .where((entry) => orders.every(
+              (order) => _orderValue(entry, (order as List)[0]) != null))
+          .toList();
+      ordered.sort((a, b) {
+        for (final order in orders) {
+          final fields = order as List;
+          final comparison = _compareOrderValues(
+            _orderValue(a, fields[0]),
+            _orderValue(b, fields[0]),
+          );
+          if (comparison != 0) {
+            final descending = fields.length > 1 && fields[1] == true;
+            return descending ? -comparison : comparison;
+          }
+        }
+        return 0;
+      });
+    }
+
     final limit = parameters['limit'] as int?;
     if (limit != null && limit >= 0) {
-      result = result.take(limit);
+      ordered = ordered.take(limit).toList();
     }
-    return result.toList();
+    return ordered;
+  }
+
+  /// The value of an `orderBy` [field] in [entry]; null when it is absent.
+  dynamic _orderValue(
+      MapEntry<String, Map<String, dynamic>> entry, dynamic field) {
+    if (field is FieldPath) {
+      if (field.components.first == '__name__') {
+        return entry.key;
+      }
+      return _dig(entry.value, field);
+    }
+    return _dig(entry.value, FieldPath.fromString(field as String));
+  }
+
+  int _compareOrderValues(dynamic a, dynamic b) {
+    final left = _comparableValue(a);
+    final right = _comparableValue(b);
+    if (left == null || right == null) {
+      return 0;
+    }
+    return Comparable.compare(left, right);
+  }
+
+  /// Timestamps and DateTimes compare chronologically; everything else the
+  /// store holds (numbers, strings) compares as itself.
+  dynamic _comparableValue(dynamic value) {
+    if (value is Timestamp) {
+      return value.toDate().microsecondsSinceEpoch;
+    }
+    if (value is DateTime) {
+      return value.microsecondsSinceEpoch;
+    }
+    if (value is num || value is String) {
+      return value;
+    }
+    return null;
   }
 
   bool _matchesCondition(MapEntry<String, Map<String, dynamic>> entry,
