@@ -9,6 +9,12 @@ import '/backend/schema/enums/enums.dart';
 import 'index.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 
+/// Returns [value] when it is a String, otherwise null.
+///
+/// Used for the legacy String-typed `vitalLogs.createdAt/updatedAt` fields so a
+/// stored Timestamp (surfaced as a DateTime) does not throw on read.
+String? _stringOrNull(dynamic value) => value is String ? value : null;
+
 class VitalLogsRecord extends FirestoreRecord {
   VitalLogsRecord._(
     DocumentReference reference,
@@ -96,8 +102,14 @@ class VitalLogsRecord extends FirestoreRecord {
     _weight = castToType<double>(snapshotData['weight']);
     _painLevel = castToType<int>(snapshotData['painLevel']);
     _notes = snapshotData['notes'] as String?;
-    _createdAt = snapshotData['createdAt'] as String?;
-    _updatedAt = snapshotData['updatedAt'] as String?;
+    // createdAt/updatedAt are String-typed in this legacy model, but a doc may
+    // hold a Firestore Timestamp instead (mapFromFirestore turns it into a
+    // DateTime before it reaches here). A hard cast would throw, and
+    // queryCollection's safeGet would then DROP the whole document. Read
+    // defensively: a String is returned exactly as stored; any other type is
+    // treated as absent so the rest of the record still loads.
+    _createdAt = _stringOrNull(snapshotData['createdAt']);
+    _updatedAt = _stringOrNull(snapshotData['updatedAt']);
   }
 
   static CollectionReference get collection =>
