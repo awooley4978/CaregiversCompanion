@@ -128,6 +128,38 @@ void main() {
       expect(renderedTexts(tester), isNot(contains('Sarah (Primary)')));
     });
 
+    testWidgets('the header shows the profile name when the auth display name '
+        'is empty (email/password sign-in)', (tester) async {
+      // The caregiver's real name lives on their users/{uid} profile — what the
+      // Settings identity sheet writes — and the auth account has none.
+      fakeAuthPlatform.emitSignedIn(
+        uid: 'u1',
+        email: 'maria.alvarez@example.com',
+      );
+      fakeFirestore.writeDoc('users/u1', {'name': 'Maria Alvarez'});
+
+      await pumpWithAppState(tester, const DashboardNotesFormWidget());
+
+      expect(find.text('Maria Alvarez'), findsOneWidget);
+      // The email address is never used as the pre-filled author.
+      expect(renderedTexts(tester), isNot(contains('maria.alvarez@example.com')));
+    });
+
+    testWidgets('the header stays blank when no name is known anywhere',
+        (tester) async {
+      // Signed in by email, but neither the profile nor the auth account holds
+      // a name.
+      fakeAuthPlatform.emitSignedIn(uid: 'u2', email: 'noname@example.com');
+      fakeFirestore.writeDoc('users/u2', {'email': 'noname@example.com'});
+
+      await pumpWithAppState(tester, const DashboardNotesFormWidget());
+
+      expect(renderedTexts(tester), contains(''));
+      expect(find.text('noname@example.com'), findsNothing);
+      expect(renderedTexts(tester), isNot(contains('Sarah (Primary)')));
+      expect(renderedTexts(tester), isNot(contains('Caregiver')));
+    });
+
     testWidgets('a note card with no stored author renders blank, never a '
         'placeholder identity', (tester) async {
       await pumpWithAppState(tester, const NoteCardWidget());

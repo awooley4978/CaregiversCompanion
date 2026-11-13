@@ -1,3 +1,4 @@
+import '/backend/auth/auth_service.dart';
 import '/backend/backend.dart';
 import '/components/button/button_widget.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
@@ -74,6 +75,10 @@ class _DashboardNotesFormWidgetState extends State<DashboardNotesFormWidget> {
     _model.noteTextFocusNode ??= FocusNode();
 
     WidgetsBinding.instance.addPostFrameCallback((_) => safeSetState(() {}));
+
+    // The header shows the caregiver's real name from their profile; it fills
+    // in as soon as the profile read lands.
+    _loadProfileName();
   }
 
   @override
@@ -97,20 +102,43 @@ class _DashboardNotesFormWidgetState extends State<DashboardNotesFormWidget> {
     return email.isNotEmpty ? email : 'Caregiver';
   }
 
-  /// The signed-in caregiver's display name, or blank when it is not known
-  /// yet. The header pre-fill never invents an author (U6).
-  String _signedInDisplayName() =>
-      FirebaseAuth.instance.currentUser?.displayName?.trim() ?? '';
+  /// The signed-in caregiver's own name, read from their `users/{uid}` profile
+  /// — where the Settings identity sheet writes it (`saveOwnName`). Blank until
+  /// it is resolved, and blank when the profile holds no name at all: the
+  /// header pre-fill never invents an author (U6).
+  String _profileName = '';
+
+  Future<void> _loadProfileName() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    var name = '';
+    if (uid.isNotEmpty) {
+      try {
+        name = (await loadUserProfile(uid))?.name.trim() ?? '';
+      } catch (_) {
+        // Unreadable profile: stay blank rather than guess a name.
+        name = '';
+      }
+    }
+    if (!mounted) {
+      return;
+    }
+    setState(() => _profileName = name);
+  }
 
   /// The author shown in the header: the note's own author when editing an
   /// existing note (a stored value renders exactly as stored), else the
-  /// signed-in caregiver's display name — blank until that is known.
+  /// signed-in caregiver's profile name, else the auth account's display name
+  /// — blank until one of those is known. Never the email address.
   String _displayAuthor() {
     final note = widget.note;
     if (note != null && note.createdBy.trim().isNotEmpty) {
       return note.createdBy.trim();
     }
-    return _signedInDisplayName();
+    final profileName = _profileName.trim();
+    if (profileName.isNotEmpty) {
+      return profileName;
+    }
+    return FirebaseAuth.instance.currentUser?.displayName?.trim() ?? '';
   }
 
   String _initialsFor(String name) => name
