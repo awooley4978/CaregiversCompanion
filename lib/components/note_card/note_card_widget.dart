@@ -20,8 +20,8 @@ class NoteCardWidget extends StatefulWidget {
     String? time,
     bool? isPrivate,
   })  : this.authorBg = authorBg ?? const Color(0x00000000),
-        this.authorInitials = authorInitials ?? 'S',
-        this.authorName = authorName ?? 'Sarah (Primary)',
+        this.authorInitials = authorInitials ?? '',
+        this.authorName = authorName ?? '',
         this.content = content ??
             'Mom had a small appetite this morning. Ate about half of her breakfast (oatmeal with berries). Hydration is looking good today.',
         this.time = time ?? '10:30 AM',
@@ -107,7 +107,7 @@ class _NoteCardWidgetState extends State<NoteCardWidget> {
                             child: Text(
                               valueOrDefault<String>(
                                 widget!.authorInitials,
-                                'S',
+                                '',
                               ),
                               textAlign: TextAlign.center,
                               maxLines: 1,
@@ -141,7 +141,7 @@ class _NoteCardWidgetState extends State<NoteCardWidget> {
                               Text(
                                 valueOrDefault<String>(
                                   widget!.authorName,
-                                  'Sarah (Primary)',
+                                  '',
                                 ),
                                 style: FlutterFlowTheme.of(context)
                                     .labelLarge

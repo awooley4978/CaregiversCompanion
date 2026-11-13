@@ -56,6 +56,7 @@ dependencies:
   intl: ^0.20.3
   json_path: 0.7.2
   page_transition: 2.2.2
+  package_info_plus: ^10.2.2
   path_provider: 2.1.4
   path_provider_android: 2.2.10
   path_provider_foundation: 2.4.0

@@ -24,8 +24,8 @@ class DashboardNotesFormWidget extends StatefulWidget {
     this.careRecipientRef,
     this.note,
   })  : this.authorBg = authorBg ?? const Color(0x00000000),
-        this.authorInitials = authorInitials ?? 'S',
-        this.authorName = authorName ?? 'Sarah (Primary)',
+        this.authorInitials = authorInitials ?? '',
+        this.authorName = authorName ?? '',
         this.content = content ??
             'Mom had a small appetite this morning. Ate about half of her breakfast (oatmeal with berries). Hydration is looking good today.',
         this.time = time ?? '10:30 AM',
@@ -97,14 +97,20 @@ class _DashboardNotesFormWidgetState extends State<DashboardNotesFormWidget> {
     return email.isNotEmpty ? email : 'Caregiver';
   }
 
+  /// The signed-in caregiver's display name, or blank when it is not known
+  /// yet. The header pre-fill never invents an author (U6).
+  String _signedInDisplayName() =>
+      FirebaseAuth.instance.currentUser?.displayName?.trim() ?? '';
+
   /// The author shown in the header: the note's own author when editing an
-  /// existing note, else the signed-in caregiver.
+  /// existing note (a stored value renders exactly as stored), else the
+  /// signed-in caregiver's display name — blank until that is known.
   String _displayAuthor() {
     final note = widget.note;
     if (note != null && note.createdBy.trim().isNotEmpty) {
       return note.createdBy.trim();
     }
-    return _signedInAuthor();
+    return _signedInDisplayName();
   }
 
   String _initialsFor(String name) => name

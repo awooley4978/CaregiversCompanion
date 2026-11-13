@@ -9,6 +9,7 @@ import '/backend/org/org_service.dart'
         kRoleCaregiver,
         kRoleOwner,
         kRoleViewer;
+import '/components/app_version_label/app_version_label_widget.dart';
 import '/components/button/button_widget.dart';
 import '/components/identity_edit_sheet/identity_edit_sheet.dart';
 import '/components/nav_menu_directory/nav_menu_directory_widget.dart';
@@ -29,7 +30,11 @@ import 'settings_account_model.dart';
 export 'settings_account_model.dart';
 
 class SettingsAccountWidget extends StatefulWidget {
-  const SettingsAccountWidget({super.key});
+  const SettingsAccountWidget({super.key, this.versionLoader});
+
+  /// Injectable source of the app package version for the footer (tests supply
+  /// a fixed value or a failing lookup). Null uses the real package info.
+  final Future<String?> Function()? versionLoader;
 
   static String routeName = 'SettingsAccount';
   static String routePath = '/settingsAccount';
@@ -610,8 +615,8 @@ class _SettingsAccountWidgetState extends State<SettingsAccountWidget> {
                         mainAxisAlignment: MainAxisAlignment.start,
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          Text(
-                            'Caregiver Command v1.2.4',
+                          AppVersionLabel(
+                            versionLoader: widget.versionLoader,
                             style: FlutterFlowTheme.of(context)
                                 .labelSmall
                                 .override(
