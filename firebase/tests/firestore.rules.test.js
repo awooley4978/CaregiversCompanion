@@ -391,21 +391,255 @@ describe('FAMILY CAREGIVER within recipient org (non-owner)', () => {
 
 // ---------------------------------------------------------------------------
 // DEAD / PLACEHOLDER COLLECTIONS — deny pins. The V1 consolidated decision is
-// "stay denied": emerencyinfo, vitalLogs, appointments, dashboardNotes and
-// iconname have NO functional read/write path anywhere in lib/ (their pages are
-// static mockups / print-stubs), so they keep the Phase-4 `allow read, write:
-// if false` blocks. These pins make an accidental future enable FAIL CI even if
-// no UI work lands with it. Even the OWNER (who legitimately accesses every
-// functional collection) is denied here.
+// "stay denied": emerencyinfo, appointments, dashboardNotes and iconname have
+// NO functional read/write path anywhere in lib/ (their pages are static
+// mockups / print-stubs), so they keep the Phase-4 `allow read, write: if
+// false` blocks. These pins make an accidental future enable FAIL CI even if no
+// UI work lands with it. Even the OWNER (who legitimately accesses every
+// functional collection) is denied here. (vitalLogs was enabled 2026-11-13 —
+// owner-approved v2 design — and has its own suite below.)
 // ---------------------------------------------------------------------------
 describe('DEAD COLLECTIONS stay denied (V1 consolidated decision)', () => {
-  const dead = ['emerencyinfo', 'vitalLogs', 'appointments', 'dashboardNotes', 'iconname'];
+  const dead = ['emerencyinfo', 'appointments', 'dashboardNotes', 'iconname'];
   dead.forEach((col) => {
     it(`${col}: read AND write DENIED for an active owner`, async () => {
       const db = dbFor(OWNER);
       await assertFails(db.doc(col+'/x_probe').get());
       await assertFails(db.doc(col+'/x_probe').set({ anyField: true }));
       await assertFails(db.doc(col+'/x_probe').delete());
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// VITALLOGS — enabled 2026-11-13 from the dead-collection deny (owner-approved
+// v2 design; see vitals-rules-proposal-v2-2026-11-13.md §7 for the case list).
+//
+// Reads are RECIPIENT-SCOPED for get AND list (the list rule uses a get() on
+// the stored careRecipientRef, which only resolves when the query constrains
+// that field). Writes are attributed: create stamps loggedByUid == caller, a
+// non-future logDateTime, and an orgId strictly matching the recipient's own
+// org; orgId / loggedByUid / careRecipientRef are immutable; edits and deletes
+// are the author's or an owner/admin of the recipient's org.
+// ---------------------------------------------------------------------------
+describe('VITALLOGS (owner-approved v2: recipient-scoped reads, attributed writes)', () => {
+  const CG2    = 'uid_caregiver2'; // second family caregiver in org_fam
+  const ADMIN  = 'uid_admin';      // admin in org_fam
+  const VIEWER = 'uid_viewer';     // viewer in org_fam (read-only role)
+  const REC_F2   = 'rec_f2';       // second recipient in org_fam (list scoping)
+  const REC_BULK = 'rec_bulk';     // org_fam recipient with a 300-reading history
+  const REC_GONE = 'rec_gone';     // referenced by a reading but never created
+
+  // request.time is server time, so "past"/"future" are computed per call.
+  const past   = () => new Date(Date.now() - 60 * 60 * 1000);
+  const future = () => new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+  let F2ref, BULKref, GONEref;
+
+  // A reading authored by AUTHOR (CAREGIVER) on the given recipient ref.
+  const reading = (ref, extra) => ({
+    careRecipientRef: ref, orgId: ORG_FAM, logDateTime: past(),
+    loggedByUid: CAREGIVER, value: 120, ...extra,
+  });
+
+  before(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      const set = (p, d) => db.doc(p).set(d);
+      F2ref   = db.doc('careRecipients/' + REC_F2);
+      BULKref = db.doc('careRecipients/' + REC_BULK);
+      GONEref = db.doc('careRecipients/' + REC_GONE); // never written
+      await set('careRecipients/' + REC_F2,   { orgId: ORG_FAM });
+      await set('careRecipients/' + REC_BULK, { orgId: ORG_FAM });
+      // extra org_fam members the vitals matrix needs
+      await set('users/' + CG2,    { activeGroupId: ORG_FAM });
+      await set('users/' + ADMIN,  { activeGroupId: ORG_FAM });
+      await set('users/' + VIEWER, { activeGroupId: ORG_FAM });
+      await set(`organizations/${ORG_FAM}/members/${CG2}`,    { uid: CG2, role: 'caregiver', status: 'active' });
+      await set(`organizations/${ORG_FAM}/members/${ADMIN}`,  { uid: ADMIN, role: 'admin', status: 'active' });
+      await set(`organizations/${ORG_FAM}/members/${VIEWER}`, { uid: VIEWER, role: 'viewer', status: 'active' });
+      // readings on the shared org_fam recipient (vital_read1) and a second one
+      await set('vitalLogs/vital_read1', reading(F1ref));
+      await set('vitalLogs/vital_f2_1',  reading(F2ref));
+      // one reading on the professional org's recipient (unassigned-staff case)
+      await set('vitalLogs/vital_prof_1', {
+        careRecipientRef: PROFref, orgId: ORG_PROF, logDateTime: past(),
+        loggedByUid: PROFOWNER, value: 98,
+      });
+      // per-case docs so no test mutates another test's fixture
+      for (const id of ['vital_upd_author', 'vital_upd_cg2', 'vital_upd_owner',
+                        'vital_upd_admin', 'vital_upd_uid', 'vital_upd_org',
+                        'vital_upd_ref', 'vital_upd_future', 'vital_del_author',
+                        'vital_del_cg2', 'vital_del_owner', 'vital_del_stranger']) {
+        await set('vitalLogs/' + id, reading(F1ref));
+      }
+      // orphan: a reading whose careRecipientRef was never created
+      await set('vitalLogs/vital_orphan', reading(GONEref));
+      // 300-reading history for the read-budget / large-result case
+      const batch = db.batch();
+      for (let i = 0; i < 300; i++) {
+        batch.set(db.doc('vitalLogs/bulk_' + i), reading(BULKref));
+      }
+      await batch.commit();
+    });
+  });
+
+  // ---------------------------------------------------------------- create
+  describe('create — attributed, org-matched, non-future', () => {
+    it('family caregiver create SUCCEEDS', async () => {
+      await assertSucceeds(dbFor(CAREGIVER).doc('vitalLogs/vital_new_cg').set(reading(F1ref)));
+    });
+    it('back-dated logDateTime SUCCEEDS', async () => {
+      await assertSucceeds(dbFor(CAREGIVER).doc('vitalLogs/vital_new_backdated').set({
+        careRecipientRef: F1ref, orgId: ORG_FAM, loggedByUid: CAREGIVER,
+        logDateTime: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000), value: 110,
+      }));
+    });
+    it('missing orgId is DENIED', async () => {
+      const d = reading(F1ref); delete d.orgId;
+      await assertFails(dbFor(CAREGIVER).doc('vitalLogs/vital_new_noorg').set(d));
+    });
+    it('another org\'s orgId is DENIED (strict org match)', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('vitalLogs/vital_new_wrongorg').set(
+        reading(F1ref, { orgId: ORG_OTHER })));
+    });
+    it('loggedByUid != caller is DENIED (no impersonation)', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('vitalLogs/vital_new_imposter').set(
+        reading(F1ref, { loggedByUid: OWNER })));
+    });
+    it('future-dated logDateTime is DENIED', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('vitalLogs/vital_new_future').set(
+        reading(F1ref, { logDateTime: future() })));
+    });
+    it('family VIEWER is DENIED', async () => {
+      await assertFails(dbFor(VIEWER).doc('vitalLogs/vital_new_viewer').set(
+        reading(F1ref, { loggedByUid: VIEWER })));
+    });
+    it('stranger (other org) is DENIED', async () => {
+      await assertFails(dbFor(STRANGER).doc('vitalLogs/vital_new_stranger').set(
+        reading(F1ref, { loggedByUid: STRANGER })));
+    });
+    it('unassigned professional caregiver is DENIED', async () => {
+      await assertFails(dbFor(PROFCARE).doc('vitalLogs/vital_new_prof').set({
+        careRecipientRef: PROFref, orgId: ORG_PROF, logDateTime: past(),
+        loggedByUid: PROFCARE, value: 100,
+      }));
+    });
+    it('grantee with a caregiver-level share SUCCEEDS on the shared recipient', async () => {
+      await assertSucceeds(dbFor(GRANTEE).doc('vitalLogs/vital_new_grantee').set({
+        careRecipientRef: F1ref, orgId: ORG_FAM, logDateTime: past(),
+        loggedByUid: GRANTEE, value: 118,
+      }));
+    });
+  });
+
+  // ---------------------------------------------------------------- get
+  describe('get — recipient-scoped single-doc reads', () => {
+    it('owner of the recipient org SUCCEEDS', async () => {
+      await assertSucceeds(dbFor(OWNER).doc('vitalLogs/vital_read1').get());
+    });
+    it('stranger (other org) is DENIED', async () => {
+      await assertFails(dbFor(STRANGER).doc('vitalLogs/vital_read1').get());
+    });
+    it('grantee SUCCEEDS on the shared recipient', async () => {
+      await assertSucceeds(dbFor(GRANTEE).doc('vitalLogs/vital_read1').get());
+    });
+    it('grantee is DENIED on a NON-shared recipient', async () => {
+      await assertFails(dbFor(GRANTEE).doc('vitalLogs/vital_f2_1').get());
+    });
+  });
+
+  // ---------------------------------------------------------------- list
+  describe('list — query must constrain careRecipientRef', () => {
+    it('where careRecipientRef == recipient SUCCEEDS and returns only that recipient', async () => {
+      const snap = await dbFor(CAREGIVER)
+        .collection('vitalLogs').where('careRecipientRef', '==', F1ref).get();
+      const ids = snap.docs.map((d) => d.id);
+      if (!ids.includes('vital_read1')) {
+        throw new Error('recipient vitals LIST returned none of its own docs: ' + ids.join(','));
+      }
+      if (ids.includes('vital_f2_1') || ids.includes('bulk_0')) {
+        throw new Error('cross-recipient leak in vitalLogs LIST: ' + ids.join(','));
+      }
+    });
+    it('bare collection list is DENIED (no org-wide vitals read)', async () => {
+      await assertFails(dbFor(OWNER).collection('vitalLogs').get());
+    });
+    it('where orgId ONLY is DENIED (careRecipientRef unconstrained)', async () => {
+      await assertFails(dbFor(OWNER)
+        .collection('vitalLogs').where('orgId', '==', ORG_FAM).get());
+    });
+    it('grantee list on a NON-shared recipient is DENIED', async () => {
+      await assertFails(dbFor(GRANTEE)
+        .collection('vitalLogs').where('careRecipientRef', '==', F2ref).get());
+    });
+    it('unassigned professional caregiver list is DENIED', async () => {
+      await assertFails(dbFor(PROFCARE)
+        .collection('vitalLogs').where('careRecipientRef', '==', PROFref).get());
+    });
+    it('a 300-document result is still ALLOWED', async () => {
+      const snap = await dbFor(OWNER)
+        .collection('vitalLogs').where('careRecipientRef', '==', BULKref).get();
+      if (snap.docs.length !== 300) {
+        throw new Error('expected 300 readings, got ' + snap.docs.length);
+      }
+    });
+  });
+
+  // ---------------------------------------------------------------- update
+  describe('update — author or owner/admin, immutable attribution', () => {
+    it('author (the caregiver who wrote it) SUCCEEDS', async () => {
+      await assertSucceeds(dbFor(CAREGIVER).doc('vitalLogs/vital_upd_author').update({ value: 125 }));
+    });
+    it('a SECOND caregiver is DENIED', async () => {
+      await assertFails(dbFor(CG2).doc('vitalLogs/vital_upd_cg2').update({ value: 130 }));
+    });
+    it('owner of the recipient org SUCCEEDS', async () => {
+      await assertSucceeds(dbFor(OWNER).doc('vitalLogs/vital_upd_owner').update({ value: 131 }));
+    });
+    it('admin of the recipient org SUCCEEDS', async () => {
+      await assertSucceeds(dbFor(ADMIN).doc('vitalLogs/vital_upd_admin').update({ value: 132 }));
+    });
+    it('rewriting loggedByUid is DENIED (attribution immutable)', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('vitalLogs/vital_upd_uid').update({ loggedByUid: OWNER }));
+    });
+    it('changing orgId is DENIED', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('vitalLogs/vital_upd_org').update({ orgId: ORG_OTHER }));
+    });
+    it('changing careRecipientRef is DENIED', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('vitalLogs/vital_upd_ref').update({ careRecipientRef: F2ref }));
+    });
+    it('moving logDateTime into the future is DENIED', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('vitalLogs/vital_upd_future').update({ logDateTime: future() }));
+    });
+  });
+
+  // ---------------------------------------------------------------- delete
+  describe('delete — author or owner/admin only', () => {
+    it('author SUCCEEDS', async () => {
+      await assertSucceeds(dbFor(CAREGIVER).doc('vitalLogs/vital_del_author').delete());
+    });
+    it('a SECOND caregiver is DENIED', async () => {
+      await assertFails(dbFor(CG2).doc('vitalLogs/vital_del_cg2').delete());
+    });
+    it('owner of the recipient org SUCCEEDS', async () => {
+      await assertSucceeds(dbFor(OWNER).doc('vitalLogs/vital_del_owner').delete());
+    });
+    it('stranger (other org) is DENIED', async () => {
+      await assertFails(dbFor(STRANGER).doc('vitalLogs/vital_del_stranger').delete());
+    });
+  });
+
+  // ---------------------------------------------------------------- orphan
+  describe('orphan — reading pointing at a non-existent recipient', () => {
+    // Deliberate limitation (proposal v2 §6.1): the rule resolves access from
+    // the referenced recipient, so an orphaned reading is unreachable through
+    // the client — pinned here so a future change to that is intentional.
+    it('is UNREADABLE', async () => {
+      await assertFails(dbFor(OWNER).doc('vitalLogs/vital_orphan').get());
+    });
+    it('is UNDELETABLE, even by the owner', async () => {
+      await assertFails(dbFor(OWNER).doc('vitalLogs/vital_orphan').delete());
     });
   });
 });

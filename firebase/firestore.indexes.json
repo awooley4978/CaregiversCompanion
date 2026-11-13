@@ -27,6 +27,20 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "vitalLogs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "careRecipientRef",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "logDateTime",
+          "order": "DESCENDING"
+        }
+      ]
     }
   ]
 }
