@@ -6,9 +6,12 @@ import '/flutter_flow/flutter_flow_icon_button.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/flutter_flow_widgets.dart';
+import '/reports/emergency_info.dart';
+import '/reports/emergency_info_pdf.dart';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'i_emergency_information_model.dart';
@@ -31,12 +34,92 @@ class _IEmergencyInformationWidgetState
 
   final scaffoldKey = GlobalKey<ScaffoldState>();
 
+  /// The ONE load that feeds this screen and the EMS PDF. Both render this same
+  /// object, so the page and the printout cannot disagree.
+  EmergencyInfoData? _info;
+  Future<EmergencyInfoData?>? _loadFuture;
+  String? _loadError;
+  bool _exporting = false;
+
   @override
   void initState() {
     super.initState();
     _model = createModel(context, () => IEmergencyInformationModel());
 
+    _loadFuture = _load();
     WidgetsBinding.instance.addPostFrameCallback((_) => safeSetState(() {}));
+  }
+
+  /// Reads the selected care recipient's profile once, for this page.
+  Future<EmergencyInfoData?> _load() async {
+    final recipientRef = FFAppState().selectedCareRecipient;
+    if (recipientRef == null) {
+      if (mounted) {
+        safeSetState(() => _loadError =
+            'No care recipient is selected, so there is no emergency info to '
+            'show.');
+      }
+      return null;
+    }
+    try {
+      final info = await EmergencyInfoData.load(recipientRef: recipientRef);
+      if (mounted) {
+        safeSetState(() {
+          _info = info;
+          _loadError = null;
+        });
+      }
+      return info;
+    } catch (_) {
+      if (mounted) {
+        safeSetState(() => _loadError =
+            'Could not load emergency info. Please check your connection and '
+            'try again.');
+      }
+      return null;
+    }
+  }
+
+  /// Exports the data the screen is already showing: the PDF is built from the
+  /// loaded [EmergencyInfoData], never from a second read.
+  Future<void> _exportPdf() async {
+    final info = _info ?? await _loadFuture;
+    if (info == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _loadError ?? 'Emergency info is not available to export yet.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
+    safeSetState(() => _exporting = true);
+    try {
+      final bytes = await buildEmergencyInfoPdf(info);
+      await Printing.layoutPdf(
+        name: emergencyInfoFileName(info),
+        onLayout: (format) async => bytes,
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Could not build the EMS PDF. Please check your connection and '
+              'try again.',
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        safeSetState(() => _exporting = false);
+      }
+    }
   }
 
   @override
@@ -137,6 +220,88 @@ class _IEmergencyInformationWidgetState
                                         lineHeight: 1.3,
                                       ),
                                 ),
+                                if (_info != null) ...[
+                                  Text(
+                                    _info!.recipientNameOrNotProvided,
+                                    style: FlutterFlowTheme.of(context)
+                                        .bodyMedium
+                                        .override(
+                                          font: GoogleFonts.nunito(
+                                            fontWeight: FontWeight.w600,
+                                            fontStyle:
+                                                FlutterFlowTheme.of(context)
+                                                    .bodyMedium
+                                                    .fontStyle,
+                                          ),
+                                          color: FlutterFlowTheme.of(context)
+                                              .primaryText,
+                                          letterSpacing: 0.0,
+                                          fontWeight: FontWeight.w600,
+                                          fontStyle: FlutterFlowTheme.of(context)
+                                              .bodyMedium
+                                              .fontStyle,
+                                          lineHeight: 1.6,
+                                        ),
+                                  ),
+                                  Text(
+                                    'DOB: ${_info!.dateOfBirthOrNotProvided}',
+                                    style: FlutterFlowTheme.of(context)
+                                        .bodySmall
+                                        .override(
+                                          font: GoogleFonts.nunito(
+                                            fontWeight:
+                                                FlutterFlowTheme.of(context)
+                                                    .bodySmall
+                                                    .fontWeight,
+                                            fontStyle:
+                                                FlutterFlowTheme.of(context)
+                                                    .bodySmall
+                                                    .fontStyle,
+                                          ),
+                                          color: FlutterFlowTheme.of(context)
+                                              .secondaryText,
+                                          letterSpacing: 0.0,
+                                          fontWeight:
+                                              FlutterFlowTheme.of(context)
+                                                  .bodySmall
+                                                  .fontWeight,
+                                          fontStyle:
+                                              FlutterFlowTheme.of(context)
+                                                  .bodySmall
+                                                  .fontStyle,
+                                          lineHeight: 1.5,
+                                        ),
+                                  ),
+                                ] else
+                                  Text(
+                                    _loadError ?? 'Loading...',
+                                    style: FlutterFlowTheme.of(context)
+                                        .bodySmall
+                                        .override(
+                                          font: GoogleFonts.nunito(
+                                            fontWeight:
+                                                FlutterFlowTheme.of(context)
+                                                    .bodySmall
+                                                    .fontWeight,
+                                            fontStyle:
+                                                FlutterFlowTheme.of(context)
+                                                    .bodySmall
+                                                    .fontStyle,
+                                          ),
+                                          color: FlutterFlowTheme.of(context)
+                                              .secondaryText,
+                                          letterSpacing: 0.0,
+                                          fontWeight:
+                                              FlutterFlowTheme.of(context)
+                                                  .bodySmall
+                                                  .fontWeight,
+                                          fontStyle:
+                                              FlutterFlowTheme.of(context)
+                                                  .bodySmall
+                                                  .fontStyle,
+                                          lineHeight: 1.5,
+                                        ),
+                                  ),
                               ].divide(SizedBox(height: 4.0)),
                             ),
                             Align(
@@ -235,75 +400,7 @@ class _IEmergencyInformationWidgetState
                                     runAlignment: WrapAlignment.start,
                                     verticalDirection: VerticalDirection.down,
                                     clipBehavior: Clip.none,
-                                    children: [
-                                      wrapWithModel(
-                                        model: _model.medicalBadgeModel1,
-                                        updateCallback: () =>
-                                            safeSetState(() {}),
-                                        child: MedicalBadgeWidget(
-                                          bg: Color(0xFFFEE2E2),
-                                          color: FlutterFlowTheme.of(context)
-                                              .error,
-                                          icon: Icon(
-                                            Icons.warning_rounded,
-                                            color: FlutterFlowTheme.of(context)
-                                                .error,
-                                            size: 14.0,
-                                          ),
-                                          label: 'Allergy: Penicillin',
-                                        ),
-                                      ),
-                                      wrapWithModel(
-                                        model: _model.medicalBadgeModel2,
-                                        updateCallback: () =>
-                                            safeSetState(() {}),
-                                        child: MedicalBadgeWidget(
-                                          bg: Color(0xFFE0F2F1),
-                                          color: FlutterFlowTheme.of(context)
-                                              .primary,
-                                          icon: Icon(
-                                            Icons.favorite_rounded,
-                                            color: FlutterFlowTheme.of(context)
-                                                .error,
-                                            size: 14.0,
-                                          ),
-                                          label: 'Hypertension',
-                                        ),
-                                      ),
-                                      wrapWithModel(
-                                        model: _model.medicalBadgeModel3,
-                                        updateCallback: () =>
-                                            safeSetState(() {}),
-                                        child: MedicalBadgeWidget(
-                                          bg: Color(0xFFFEF3C7),
-                                          color: Color(0xFFB45309),
-                                          icon: Icon(
-                                            Icons.personal_injury_rounded,
-                                            color: FlutterFlowTheme.of(context)
-                                                .error,
-                                            size: 14.0,
-                                          ),
-                                          label: 'Fall Risk',
-                                        ),
-                                      ),
-                                      wrapWithModel(
-                                        model: _model.medicalBadgeModel4,
-                                        updateCallback: () =>
-                                            safeSetState(() {}),
-                                        child: MedicalBadgeWidget(
-                                          bg: Color(0xFFE0F2F1),
-                                          color: FlutterFlowTheme.of(context)
-                                              .primary,
-                                          icon: Icon(
-                                            Icons.water_drop_rounded,
-                                            color: FlutterFlowTheme.of(context)
-                                                .error,
-                                            size: 14.0,
-                                          ),
-                                          label: 'Type 2 Diabetes',
-                                        ),
-                                      ),
-                                    ],
+                                    children: _medicalBadges(context),
                                   ),
                                 ].divide(SizedBox(height: 16.0)),
                               ),
@@ -336,36 +433,7 @@ class _IEmergencyInformationWidgetState
                                     lineHeight: 1.45,
                                   ),
                             ),
-                            wrapWithModel(
-                              model: _model.emergencyContactCardModel1,
-                              updateCallback: () => safeSetState(() {}),
-                              child: EmergencyContactCardWidget(
-                                initials: 'SJ',
-                                name: 'James Jenkins',
-                                phone: '(555) 123-4567',
-                                relation: 'Son / Primary Proxy',
-                              ),
-                            ),
-                            wrapWithModel(
-                              model: _model.emergencyContactCardModel2,
-                              updateCallback: () => safeSetState(() {}),
-                              child: EmergencyContactCardWidget(
-                                initials: 'DR',
-                                name: 'Dr. Sarah Reed',
-                                phone: '(555) 987-6543',
-                                relation: 'Primary Physician',
-                              ),
-                            ),
-                            wrapWithModel(
-                              model: _model.emergencyContactCardModel3,
-                              updateCallback: () => safeSetState(() {}),
-                              child: EmergencyContactCardWidget(
-                                initials: 'PH',
-                                name: 'Pharmacy',
-                                phone: '(555) 246-8102',
-                                relation: 'CVS Health - Downtown',
-                              ),
-                            ),
+                            ..._contactCards(context),
                           ].divide(SizedBox(height: 16.0)),
                         ),
                         Column(
@@ -449,76 +517,11 @@ class _IEmergencyInformationWidgetState
                                         crossAxisAlignment:
                                             CrossAxisAlignment.center,
                                         children: [
-                                          Text(
-                                            '• Lisinopril 10mg - 1 tablet daily',
-                                            style: FlutterFlowTheme.of(context)
-                                                .bodyMedium
-                                                .override(
-                                                  font: GoogleFonts.nunito(
-                                                    fontWeight:
-                                                        FlutterFlowTheme.of(
-                                                                context)
-                                                            .bodyMedium
-                                                            .fontWeight,
-                                                    fontStyle:
-                                                        FlutterFlowTheme.of(
-                                                                context)
-                                                            .bodyMedium
-                                                            .fontStyle,
-                                                  ),
-                                                  color: FlutterFlowTheme.of(
-                                                          context)
-                                                      .primaryText,
-                                                  letterSpacing: 0.0,
-                                                  fontWeight:
-                                                      FlutterFlowTheme.of(
-                                                              context)
-                                                          .bodyMedium
-                                                          .fontWeight,
-                                                  fontStyle:
-                                                      FlutterFlowTheme.of(
-                                                              context)
-                                                          .bodyMedium
-                                                          .fontStyle,
-                                                  lineHeight: 1.6,
-                                                ),
-                                          ),
-                                          Text(
-                                            '• Metformin 500mg - with meals',
-                                            style: FlutterFlowTheme.of(context)
-                                                .bodyMedium
-                                                .override(
-                                                  font: GoogleFonts.nunito(
-                                                    fontWeight:
-                                                        FlutterFlowTheme.of(
-                                                                context)
-                                                            .bodyMedium
-                                                            .fontWeight,
-                                                    fontStyle:
-                                                        FlutterFlowTheme.of(
-                                                                context)
-                                                            .bodyMedium
-                                                            .fontStyle,
-                                                  ),
-                                                  color: FlutterFlowTheme.of(
-                                                          context)
-                                                      .primaryText,
-                                                  letterSpacing: 0.0,
-                                                  fontWeight:
-                                                      FlutterFlowTheme.of(
-                                                              context)
-                                                          .bodyMedium
-                                                          .fontWeight,
-                                                  fontStyle:
-                                                      FlutterFlowTheme.of(
-                                                              context)
-                                                          .bodyMedium
-                                                          .fontStyle,
-                                                  lineHeight: 1.6,
-                                                ),
-                                          ),
-                                          Text(
-                                            '• Atorvastatin 20mg - nightly',
+                                          for (final line in (_info
+                                                  ?.medicationLines ??
+                                              const ['Loading...']))
+                                            Text(
+                                              '• $line',
                                             style: FlutterFlowTheme.of(context)
                                                 .bodyMedium
                                                 .override(
@@ -631,7 +634,10 @@ class _IEmergencyInformationWidgetState
                                           padding: EdgeInsets.all(16.0),
                                           child: Container(
                                             child: Text(
-                                              'DNR / POLST: Signed on 05/2023. Full code status for hospitalization.',
+                                              _info == null
+                                                  ? 'Loading...'
+                                                  : _info!
+                                                      .advanceDirectivesOrNotProvided,
                                               style: FlutterFlowTheme.of(
                                                       context)
                                                   .bodySmall
@@ -683,41 +689,25 @@ class _IEmergencyInformationWidgetState
                             mainAxisAlignment: MainAxisAlignment.start,
                             crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
-                              InkWell(
-                                splashColor: Colors.transparent,
-                                focusColor: Colors.transparent,
-                                hoverColor: Colors.transparent,
-                                highlightColor: Colors.transparent,
-                                onTap: () async {
-                                  if (isiOS) {
-                                    await launchUrl(Uri.parse(
-                                        "sms:${''}&body=${Uri.encodeComponent('')}"));
-                                  } else {
-                                    await launchUrl(Uri(
-                                      scheme: 'sms',
-                                      path: '',
-                                    ));
-                                  }
-                                },
-                                child: wrapWithModel(
-                                  model: _model.buttonModel1,
-                                  updateCallback: () => safeSetState(() {}),
-                                  child: ButtonWidget(
-                                    icon: Icon(
-                                      Icons.share_rounded,
-                                      color: FlutterFlowTheme.of(context)
-                                          .primaryText,
-                                      size: 24.0,
-                                    ),
-                                    iconPresent: true,
-                                    iconEndPresent: false,
-                                    content: 'Export PDF for EMS',
-                                    variant: 'primary',
-                                    size: 'large',
-                                    fullWidth: true,
-                                    loading: false,
-                                    disabled: false,
+                              wrapWithModel(
+                                model: _model.buttonModel1,
+                                updateCallback: () => safeSetState(() {}),
+                                child: ButtonWidget(
+                                  icon: Icon(
+                                    Icons.share_rounded,
+                                    color:
+                                        FlutterFlowTheme.of(context).primaryText,
+                                    size: 24.0,
                                   ),
+                                  iconPresent: true,
+                                  iconEndPresent: false,
+                                  content: 'Export PDF for EMS',
+                                  variant: 'primary',
+                                  size: 'large',
+                                  fullWidth: true,
+                                  loading: _exporting,
+                                  disabled: false,
+                                  onPressed: _exporting ? null : _exportPdf,
                                 ),
                               ),
                               wrapWithModel(
@@ -747,5 +737,110 @@ class _IEmergencyInformationWidgetState
         ),
       ),
     );
+  }
+
+  /// Real allergies and conditions from the loaded profile. A profile that
+  /// holds none says "Not provided" instead of showing an invented condition.
+  List<Widget> _medicalBadges(BuildContext context) {
+    final info = _info;
+    if (info == null) {
+      return [
+        MedicalBadgeWidget(
+          bg: FlutterFlowTheme.of(context).secondaryBackground,
+          color: FlutterFlowTheme.of(context).secondaryText,
+          icon: Icon(
+            Icons.hourglass_empty_rounded,
+            color: FlutterFlowTheme.of(context).secondaryText,
+            size: 14.0,
+          ),
+          label: 'Loading...',
+        ),
+      ];
+    }
+
+    final badges = <Widget>[];
+    if (info.allergies.isEmpty) {
+      badges.add(MedicalBadgeWidget(
+        bg: FlutterFlowTheme.of(context).secondaryBackground,
+        color: FlutterFlowTheme.of(context).secondaryText,
+        icon: Icon(
+          Icons.warning_rounded,
+          color: FlutterFlowTheme.of(context).secondaryText,
+          size: 14.0,
+        ),
+        label: 'Allergies: $emergencyInfoNotProvided',
+      ));
+    } else {
+      for (final allergy in info.allergies) {
+        badges.add(MedicalBadgeWidget(
+          bg: Color(0xFFFEE2E2),
+          color: FlutterFlowTheme.of(context).error,
+          icon: Icon(
+            Icons.warning_rounded,
+            color: FlutterFlowTheme.of(context).error,
+            size: 14.0,
+          ),
+          label: 'Allergy: $allergy',
+        ));
+      }
+    }
+
+    if (info.conditions.isEmpty) {
+      badges.add(MedicalBadgeWidget(
+        bg: FlutterFlowTheme.of(context).secondaryBackground,
+        color: FlutterFlowTheme.of(context).secondaryText,
+        icon: Icon(
+          Icons.favorite_rounded,
+          color: FlutterFlowTheme.of(context).secondaryText,
+          size: 14.0,
+        ),
+        label: 'Conditions: $emergencyInfoNotProvided',
+      ));
+    } else {
+      for (final condition in info.conditions) {
+        badges.add(MedicalBadgeWidget(
+          bg: Color(0xFFE0F2F1),
+          color: FlutterFlowTheme.of(context).primary,
+          icon: Icon(
+            Icons.favorite_rounded,
+            color: FlutterFlowTheme.of(context).error,
+            size: 14.0,
+          ),
+          label: condition,
+        ));
+      }
+    }
+    return badges;
+  }
+
+  /// The recipient's real emergency contact and primary care physician. The
+  /// Pharmacy card is gone: the care profile holds no pharmacy, so it could only
+  /// ever be invented (pharmacy stays a future care-profile feature).
+  List<Widget> _contactCards(BuildContext context) {
+    final info = _info;
+    if (info == null) {
+      return [
+        EmergencyContactCardWidget(
+          initials: '',
+          name: 'Loading...',
+          phone: '',
+          relation: 'Emergency Contact',
+        ),
+      ];
+    }
+    return [
+      EmergencyContactCardWidget(
+        initials: EmergencyInfoData.initialsFor(info.emergencyContactName),
+        name: info.emergencyContactNameOrNotProvided,
+        phone: info.emergencyContactPhoneOrNotProvided,
+        relation: 'Emergency Contact',
+      ),
+      EmergencyContactCardWidget(
+        initials: EmergencyInfoData.initialsFor(info.primaryCarePhysicianName),
+        name: info.primaryCarePhysicianNameOrNotProvided,
+        phone: info.primaryCarePhysicianPhoneOrNotProvided,
+        relation: 'Primary Care Physician',
+      ),
+    ];
   }
 }
