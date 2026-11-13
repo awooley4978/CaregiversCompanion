@@ -418,119 +418,10 @@ class _EVitalsTrackerLogWidgetState extends State<EVitalsTrackerLogWidget> {
 
   /// Edits the measurements of an existing reading. Returns null when the user
   /// cancels.
-  Future<VitalsDraft?> _showEditDialog(VitalsHistoryEntry entry) async {
-    final log = entry.log;
-    final controllers = <String, TextEditingController>{
-      'systolic': TextEditingController(
-          text: log.hasBloodPressureSystolic()
-              ? log.bloodPressureSystolic.toString()
-              : ''),
-      'diastolic': TextEditingController(
-          text: log.hasBloodPressureDiastolic()
-              ? log.bloodPressureDiastolic.toString()
-              : ''),
-      'heartRate':
-          TextEditingController(text: log.hasHeartRate() ? '${log.heartRate}' : ''),
-      'bloodGlucose': TextEditingController(
-          text: log.hasBloodGlucose() ? '${log.bloodGlucose}' : ''),
-      'oxygenSaturation': TextEditingController(
-          text: log.hasOxygenSaturation() ? '${log.oxygenSaturation}' : ''),
-      'temperature': TextEditingController(
-          text: log.hasTemperature() ? '${log.temperature}' : ''),
-      'weight': TextEditingController(text: log.hasWeight() ? '${log.weight}' : ''),
-      'painLevel': TextEditingController(
-          text: log.hasPainLevel() ? '${log.painLevel}' : ''),
-      'notes': TextEditingController(text: log.notes),
-    };
-
-    String? error;
-    final result = await showDialog<VitalsDraft>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setDialogState) => AlertDialog(
-          title: const Text('Edit reading'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  entry.dateTimeText,
-                  style: FlutterFlowTheme.of(dialogContext).bodySmall,
-                ),
-                const SizedBox(height: 12),
-                _dialogField('Blood pressure systolic (mmHg)',
-                    controllers['systolic']!),
-                _dialogField('Blood pressure diastolic (mmHg)',
-                    controllers['diastolic']!),
-                _dialogField('Heart rate (bpm)', controllers['heartRate']!),
-                _dialogField(
-                    'Blood glucose (mg/dL)', controllers['bloodGlucose']!),
-                _dialogField('Oxygen saturation (%)',
-                    controllers['oxygenSaturation']!),
-                _dialogField('Temperature (°F)', controllers['temperature']!),
-                _dialogField('Weight (lb)', controllers['weight']!),
-                _dialogField('Pain level (0–10)', controllers['painLevel']!),
-                _dialogField('Additional observations', controllers['notes']!),
-                if (error != null) ...[
-                  const SizedBox(height: 12),
-                  Semantics(
-                    liveRegion: true,
-                    child: Text(
-                      error!,
-                      style: FlutterFlowTheme.of(dialogContext)
-                          .bodySmall
-                          .override(color: FlutterFlowTheme.of(dialogContext).error),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () {
-                final validation = validateVitalsInput(
-                  systolic: controllers['systolic']!.text,
-                  diastolic: controllers['diastolic']!.text,
-                  heartRate: controllers['heartRate']!.text,
-                  bloodGlucose: controllers['bloodGlucose']!.text,
-                  oxygenSaturation: controllers['oxygenSaturation']!.text,
-                  temperature: controllers['temperature']!.text,
-                  weight: controllers['weight']!.text,
-                  painLevel: controllers['painLevel']!.text,
-                  notes: controllers['notes']!.text,
-                );
-                if (!validation.isValid) {
-                  setDialogState(() => error = validation.error);
-                  return;
-                }
-                Navigator.of(dialogContext).pop(validation.draft);
-              },
-              child: const Text('Save'),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    for (final controller in controllers.values) {
-      controller.dispose();
-    }
-    return result;
-  }
-
-  Widget _dialogField(String label, TextEditingController controller) =>
-      Padding(
-        padding: const EdgeInsetsDirectional.fromSTEB(0.0, 8.0, 0.0, 0.0),
-        child: TextField(
-          controller: controller,
-          decoration: InputDecoration(labelText: label, isDense: true),
-        ),
+  Future<VitalsDraft?> _showEditDialog(VitalsHistoryEntry entry) =>
+      showDialog<VitalsDraft>(
+        context: context,
+        builder: (dialogContext) => _VitalsEditDialog(entry: entry),
       );
 
   String _initials(String name) {
@@ -1290,6 +1181,151 @@ class _HistoryAction {
   final VitalsHistoryEntry entry;
   final bool delete;
 }
+
+/// The edit-reading dialog. It owns its text controllers for exactly as long
+/// as the dialog route exists: disposing them when `showDialog` returns would
+/// tear them down while the route is still animating out.
+class _VitalsEditDialog extends StatefulWidget {
+  const _VitalsEditDialog({required this.entry});
+
+  final VitalsHistoryEntry entry;
+
+  @override
+  State<_VitalsEditDialog> createState() => _VitalsEditDialogState();
+}
+
+class _VitalsEditDialogState extends State<_VitalsEditDialog> {
+  late final TextEditingController _systolic;
+  late final TextEditingController _diastolic;
+  late final TextEditingController _heartRate;
+  late final TextEditingController _bloodGlucose;
+  late final TextEditingController _oxygenSaturation;
+  late final TextEditingController _temperature;
+  late final TextEditingController _weight;
+  late final TextEditingController _painLevel;
+  late final TextEditingController _notes;
+
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    final log = widget.entry.log;
+    _systolic = TextEditingController(
+        text: log.hasBloodPressureSystolic()
+            ? log.bloodPressureSystolic.toString()
+            : '');
+    _diastolic = TextEditingController(
+        text: log.hasBloodPressureDiastolic()
+            ? log.bloodPressureDiastolic.toString()
+            : '');
+    _heartRate =
+        TextEditingController(text: log.hasHeartRate() ? '${log.heartRate}' : '');
+    _bloodGlucose = TextEditingController(
+        text: log.hasBloodGlucose() ? '${log.bloodGlucose}' : '');
+    _oxygenSaturation = TextEditingController(
+        text: log.hasOxygenSaturation() ? '${log.oxygenSaturation}' : '');
+    _temperature = TextEditingController(
+        text: log.hasTemperature() ? '${log.temperature}' : '');
+    _weight =
+        TextEditingController(text: log.hasWeight() ? '${log.weight}' : '');
+    _painLevel = TextEditingController(
+        text: log.hasPainLevel() ? '${log.painLevel}' : '');
+    _notes = TextEditingController(text: log.notes);
+  }
+
+  @override
+  void dispose() {
+    _systolic.dispose();
+    _diastolic.dispose();
+    _heartRate.dispose();
+    _bloodGlucose.dispose();
+    _oxygenSaturation.dispose();
+    _temperature.dispose();
+    _weight.dispose();
+    _painLevel.dispose();
+    _notes.dispose();
+    super.dispose();
+  }
+
+  Widget _field(String label, TextEditingController controller) => Padding(
+        padding: const EdgeInsetsDirectional.fromSTEB(0.0, 8.0, 0.0, 0.0),
+        child: TextField(
+          controller: controller,
+          decoration: InputDecoration(labelText: label, isDense: true),
+        ),
+      );
+
+  void _save() {
+    final validation = validateVitalsInput(
+      systolic: _systolic.text,
+      diastolic: _diastolic.text,
+      heartRate: _heartRate.text,
+      bloodGlucose: _bloodGlucose.text,
+      oxygenSaturation: _oxygenSaturation.text,
+      temperature: _temperature.text,
+      weight: _weight.text,
+      painLevel: _painLevel.text,
+      notes: _notes.text,
+    );
+    if (!validation.isValid) {
+      setState(() => _error = validation.error);
+      return;
+    }
+    Navigator.of(context).pop(validation.draft);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = FlutterFlowTheme.of(context);
+    return AlertDialog(
+      title: const Text('Edit reading'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              widget.entry.dateTimeText,
+              style: theme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            _field('Blood pressure systolic (mmHg)', _systolic),
+            _field('Blood pressure diastolic (mmHg)', _diastolic),
+            _field('Heart rate (bpm)', _heartRate),
+            _field('Blood glucose (mg/dL)', _bloodGlucose),
+            _field('Oxygen saturation (%)', _oxygenSaturation),
+            _field('Temperature (°F)', _temperature),
+            _field('Weight (lb)', _weight),
+            _field('Pain level (0–10)', _painLevel),
+            _field('Additional observations', _notes),
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Semantics(
+                liveRegion: true,
+                child: Text(
+                  _error!,
+                  style: theme.bodySmall.override(color: theme.error),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: _save,
+          child: const Text('Save'),
+        ),
+      ],
+    );
+  }
+}
+
 
 /// The recipient's saved readings, newest first, with the author and (where
 /// permitted) edit/delete controls.
