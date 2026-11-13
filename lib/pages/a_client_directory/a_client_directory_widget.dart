@@ -48,6 +48,31 @@ class _AClientDirectoryWidgetState extends State<AClientDirectoryWidget> {
     super.dispose();
   }
 
+  /// The typed search term, normalized for matching. The model's default value
+  /// is the literal junk string `'" "'`, so blank, whitespace-only and
+  /// quote-only terms all mean "no search" (show every recipient).
+  String _normalizedSearchTerm() {
+    return _model.searchName
+        .replaceAll('"', '')
+        .trim()
+        .toLowerCase();
+  }
+
+  /// True when [record] matches [query] (already normalized/lower-cased) by
+  /// name or by initials, ignoring punctuation so "mj" finds "M.J.".
+  bool _matchesSearch(CareRecipientsRecord record, String query) {
+    if (record.name.toLowerCase().contains(query)) {
+      return true;
+    }
+    final compactQuery = query.replaceAll(RegExp(r'[^a-z0-9]'), '');
+    if (compactQuery.isEmpty) {
+      return false;
+    }
+    final compactInitials =
+        record.initials.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+    return compactInitials.contains(compactQuery);
+  }
+
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
@@ -166,7 +191,7 @@ class _AClientDirectoryWidgetState extends State<AClientDirectoryWidget> {
                             focusNode: _model.textFieldFocusNode,
                             onChanged: (_) => EasyDebounce.debounce(
                               '_model.textController',
-                              Duration(milliseconds: 2000),
+                              Duration(milliseconds: 300),
                               () async {
                                 _model.searchName = _model.textController.text;
                                 safeSetState(() {});
@@ -348,18 +373,41 @@ class _AClientDirectoryWidgetState extends State<AClientDirectoryWidget> {
                                     listViewCareRecipientsRecordList =
                                     snapshot.data!;
 
+                                // Client-side filter over the already-streamed
+                                // circle: the search box narrows the list by
+                                // name or initials. No query/rules change.
+                                final searchTerm = _normalizedSearchTerm();
+                                final filteredRecipients = searchTerm.isEmpty
+                                    ? listViewCareRecipientsRecordList
+                                    : listViewCareRecipientsRecordList
+                                        .where((recipient) =>
+                                            _matchesSearch(recipient, searchTerm))
+                                        .toList();
+
+                                if (filteredRecipients.isEmpty &&
+                                    searchTerm.isNotEmpty) {
+                                  return Padding(
+                                    padding: EdgeInsetsDirectional.fromSTEB(
+                                        0.0, 8.0, 0.0, 16.0),
+                                    child: Text(
+                                      'No care recipients match your search.',
+                                      textAlign: TextAlign.center,
+                                      style:
+                                          FlutterFlowTheme.of(context).bodyMedium,
+                                    ),
+                                  );
+                                }
+
                                 return ListView.separated(
                                   padding: EdgeInsets.zero,
                                   shrinkWrap: true,
                                   scrollDirection: Axis.vertical,
-                                  itemCount:
-                                      listViewCareRecipientsRecordList.length,
+                                  itemCount: filteredRecipients.length,
                                   separatorBuilder: (_, __) =>
                                       SizedBox(height: 4.0),
                                   itemBuilder: (context, listViewIndex) {
                                     final listViewCareRecipientsRecord =
-                                        listViewCareRecipientsRecordList[
-                                            listViewIndex];
+                                        filteredRecipients[listViewIndex];
                                     return InkWell(
                                       splashColor: Colors.transparent,
                                       focusColor: Colors.transparent,
@@ -378,7 +426,7 @@ class _AClientDirectoryWidgetState extends State<AClientDirectoryWidget> {
                                       },
                                       child: ClientCardWidget(
                                         key: Key(
-                                            'Key5hp_${listViewIndex}_of_${listViewCareRecipientsRecordList.length}'),
+                                            'Key5hp_${listViewIndex}_of_${filteredRecipients.length}'),
                                         condition: listViewCareRecipientsRecord
                                             .primaryCondition,
                                         conditionIcon: Icon(
