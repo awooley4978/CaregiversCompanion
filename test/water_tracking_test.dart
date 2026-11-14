@@ -91,9 +91,12 @@ void main() {
             q.where('careRecipientRef', isEqualTo: recipientRef(recipientId)),
       );
 
+  /// Pumps the card. Pass [noRecipient] to exercise the no-recipient branch
+  /// (an explicit `recipient: null` is indistinguishable from "not supplied").
   Future<void> pumpCard(
     WidgetTester tester, {
     DocumentReference? recipient,
+    bool noRecipient = false,
     Stream<List<WaterLogsRecord>>? streamOverride,
   }) async {
     tester.view.physicalSize = const Size(1200.0, 2000.0);
@@ -105,7 +108,7 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: DailyWaterCardWidget(
-            recipientRef: recipient ?? recipientRef(),
+            recipientRef: noRecipient ? null : (recipient ?? recipientRef()),
             streamOverride: streamOverride,
           ),
         ),
@@ -253,7 +256,7 @@ void main() {
 
     testWidgets('with no recipient the card says so and offers no add',
         (tester) async {
-      await pumpCard(tester, recipient: null);
+      await pumpCard(tester, noRecipient: true);
 
       expect(find.text(waterSelectRecipient), findsOneWidget);
       expect(find.byKey(const ValueKey('waterCustomAmount')), findsNothing);
