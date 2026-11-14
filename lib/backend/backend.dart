@@ -8,6 +8,7 @@ import 'schema/emerencyinfo_record.dart';
 import 'schema/medications_record.dart';
 import 'schema/care_notes_record.dart';
 import 'schema/vital_logs_record.dart';
+import 'schema/water_logs_record.dart';
 import 'schema/appointments_record.dart';
 import 'schema/carechecklist_record.dart';
 import 'schema/dashboard_notes_record.dart';
@@ -27,6 +28,7 @@ export 'schema/emerencyinfo_record.dart';
 export 'schema/medications_record.dart';
 export 'schema/care_notes_record.dart';
 export 'schema/vital_logs_record.dart';
+export 'schema/water_logs_record.dart';
 export 'schema/appointments_record.dart';
 export 'schema/carechecklist_record.dart';
 export 'schema/dashboard_notes_record.dart';
@@ -217,6 +219,43 @@ Future<List<VitalLogsRecord>> queryVitalLogsRecordOnce({
     queryCollectionOnce(
       VitalLogsRecord.collection,
       VitalLogsRecord.fromSnapshot,
+      queryBuilder: queryBuilder,
+      limit: limit,
+      singleRecord: singleRecord,
+    );
+
+/// Functions to query WaterLogsRecords (as a Stream and as a Future).
+Future<int> queryWaterLogsRecordCount({
+  Query Function(Query)? queryBuilder,
+  int limit = -1,
+}) =>
+    queryCollectionCount(
+      WaterLogsRecord.collection,
+      queryBuilder: queryBuilder,
+      limit: limit,
+    );
+
+Stream<List<WaterLogsRecord>> queryWaterLogsRecord({
+  Query Function(Query)? queryBuilder,
+  int limit = -1,
+  bool singleRecord = false,
+}) =>
+    queryCollection(
+      WaterLogsRecord.collection,
+      WaterLogsRecord.fromSnapshot,
+      queryBuilder: queryBuilder,
+      limit: limit,
+      singleRecord: singleRecord,
+    );
+
+Future<List<WaterLogsRecord>> queryWaterLogsRecordOnce({
+  Query Function(Query)? queryBuilder,
+  int limit = -1,
+  bool singleRecord = false,
+}) =>
+    queryCollectionOnce(
+      WaterLogsRecord.collection,
+      WaterLogsRecord.fromSnapshot,
       queryBuilder: queryBuilder,
       limit: limit,
       singleRecord: singleRecord,
