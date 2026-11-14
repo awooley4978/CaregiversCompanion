@@ -41,6 +41,20 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "waterLogs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "careRecipientRef",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "intakeAt",
+          "order": "DESCENDING"
+        }
+      ]
     }
   ]
 }
