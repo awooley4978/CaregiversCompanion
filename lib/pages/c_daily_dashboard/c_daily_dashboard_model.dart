@@ -22,7 +22,6 @@ import 'package:provider/provider.dart';
 class CDailyDashboardModel extends FlutterFlowModel<CDailyDashboardWidget> {
   ///  Local state fields for this page.
 
-  bool water1Done = false;
 
   DateTime? selectedDate;
 

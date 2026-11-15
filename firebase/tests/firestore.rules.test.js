@@ -645,6 +645,190 @@ describe('VITALLOGS (owner-approved v2: recipient-scoped reads, attributed write
 });
 
 // ---------------------------------------------------------------------------
+// WATERLOGS — enabled 2026-11-13 (owner-approved water tracking unit; see
+// water-tracking-proposal-2026-11-13.md §3 for the block and §7 for the case
+// list). One document per individually timestamped intake.
+//
+// Same access model as vitalLogs: recipient-scoped reads for get AND list (so
+// a bare or orgId-only list is DENIED), attributed creates (loggedByUid ==
+// caller, orgId == the recipient's real org, non-future intakeAt, positive
+// amount, unit in [fl_oz, mL]) and author-or-owner/admin edit/delete — the last
+// of which is exactly what the dashboard's Undo relies on.
+// ---------------------------------------------------------------------------
+describe('WATERLOGS (water tracking: recipient-scoped reads, attributed writes)', () => {
+  const CG2   = 'uid_water_cg2'; // second family caregiver in org_fam
+  const ADMIN = 'uid_water_admin'; // admin in org_fam
+  const REC_W2 = 'rec_w2';       // second org_fam recipient (list scoping)
+
+  const past   = () => new Date(Date.now() - 60 * 1000);
+  const future = () => new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+  let W2ref;
+
+  // An 8 fl oz quick-add authored by AUTHOR on the given recipient ref.
+  const intake = (ref, extra) => ({
+    careRecipientRef: ref, orgId: ORG_FAM, intakeAt: past(),
+    loggedByUid: CAREGIVER, amount: 8, unit: 'fl_oz', amountFlOz: 8, ...extra,
+  });
+
+  before(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      const set = (p, d) => db.doc(p).set(d);
+      W2ref = db.doc('careRecipients/' + REC_W2);
+      await set('careRecipients/' + REC_W2, { orgId: ORG_FAM });
+      await set('users/' + CG2,   { activeGroupId: ORG_FAM });
+      await set('users/' + ADMIN, { activeGroupId: ORG_FAM });
+      await set(`organizations/${ORG_FAM}/members/${CG2}`,   { uid: CG2, role: 'caregiver', status: 'active' });
+      await set(`organizations/${ORG_FAM}/members/${ADMIN}`, { uid: ADMIN, role: 'admin', status: 'active' });
+      await set('waterLogs/water_read1', intake(F1ref));
+      await set('waterLogs/water_w2_1',  intake(W2ref));
+      await set('waterLogs/water_prof_1', {
+        careRecipientRef: PROFref, orgId: ORG_PROF, intakeAt: past(),
+        loggedByUid: PROFOWNER, amount: 8, unit: 'fl_oz', amountFlOz: 8,
+      });
+      for (const id of ['water_upd_author', 'water_upd_cg2', 'water_upd_owner',
+                        'water_upd_admin', 'water_upd_uid', 'water_upd_org',
+                        'water_upd_ref', 'water_upd_future', 'water_del_author',
+                        'water_del_cg2', 'water_del_owner', 'water_del_stranger']) {
+        await set('waterLogs/' + id, intake(F1ref));
+      }
+    });
+  });
+
+  // ---------------------------------------------------------------- create
+  describe('create — attributed, org-matched, non-future, positive', () => {
+    it('family caregiver quick-add SUCCEEDS', async () => {
+      await assertSucceeds(dbFor(CAREGIVER).doc('waterLogs/water_new_cg').set(intake(F1ref)));
+    });
+    it('a second caregiver may log on the same recipient (attributed)', async () => {
+      await assertSucceeds(dbFor(CG2).doc('waterLogs/water_new_cg2').set(
+        intake(F1ref, { loggedByUid: CG2 })));
+    });
+    it('mL is already accepted (unit preserved for a later mL input)', async () => {
+      await assertSucceeds(dbFor(CAREGIVER).doc('waterLogs/water_new_ml').set(
+        intake(F1ref, { amount: 250, unit: 'mL', amountFlOz: 8.45 })));
+    });
+    it('back-dated intakeAt SUCCEEDS (backdating is deferred in the UI only)', async () => {
+      await assertSucceeds(dbFor(CAREGIVER).doc('waterLogs/water_new_backdated').set(
+        intake(F1ref, { intakeAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) })));
+    });
+    it('future intakeAt is DENIED', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('waterLogs/water_new_future').set(
+        intake(F1ref, { intakeAt: future() })));
+    });
+    it('a non-positive amount is DENIED', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('waterLogs/water_new_zero').set(
+        intake(F1ref, { amount: 0, amountFlOz: 0 })));
+      await assertFails(dbFor(CAREGIVER).doc('waterLogs/water_new_negative').set(
+        intake(F1ref, { amount: -8, amountFlOz: -8 })));
+    });
+    it('an unknown unit is DENIED', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('waterLogs/water_new_unit').set(
+        intake(F1ref, { unit: 'cups' })));
+    });
+    it('missing orgId is DENIED', async () => {
+      const d = intake(F1ref); delete d.orgId;
+      await assertFails(dbFor(CAREGIVER).doc('waterLogs/water_new_noorg').set(d));
+    });
+    it('orgId that does not match the recipient org is DENIED', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('waterLogs/water_new_wrongorg').set(
+        intake(F1ref, { orgId: ORG_OTHER })));
+    });
+    it('loggedByUid spoofing another user is DENIED', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('waterLogs/water_new_imposter').set(
+        intake(F1ref, { loggedByUid: OWNER })));
+    });
+    it('a cross-org user is DENIED', async () => {
+      await assertFails(dbFor(STRANGER).doc('waterLogs/water_new_stranger').set(
+        intake(F1ref, { loggedByUid: STRANGER, orgId: ORG_OTHER })));
+    });
+    it('unassigned professional staff are DENIED', async () => {
+      await assertFails(dbFor(PROFCARE).doc('waterLogs/water_new_prof').set({
+        careRecipientRef: PROFref, orgId: ORG_PROF, intakeAt: past(),
+        loggedByUid: PROFCARE, amount: 8, unit: 'fl_oz', amountFlOz: 8,
+      }));
+    });
+  });
+
+  // ---------------------------------------------------------------- read
+  describe('read — recipient-scoped for get AND list', () => {
+    it('owner GET of their org\'s entry SUCCEEDS', async () => {
+      await assertSucceeds(dbFor(OWNER).doc('waterLogs/water_read1').get());
+    });
+    it('stranger GET is DENIED', async () => {
+      await assertFails(dbFor(STRANGER).doc('waterLogs/water_read1').get());
+    });
+    it('grantee GET of the shared recipient\'s entry SUCCEEDS', async () => {
+      await assertSucceeds(dbFor(GRANTEE).doc('waterLogs/water_read1').get());
+    });
+    it('recipient-scoped LIST SUCCEEDS and never leaks another recipient', async () => {
+      const snap = await assertSucceeds(dbFor(OWNER)
+        .collection('waterLogs').where('careRecipientRef', '==', F1ref).get());
+      const ids = snap.docs.map((d) => d.id);
+      if (ids.includes('water_w2_1') || ids.includes('water_prof_1')) {
+        throw new Error('cross-recipient leak in waterLogs LIST: ' + ids.join(','));
+      }
+    });
+    it('a bare collection LIST is DENIED', async () => {
+      await assertFails(dbFor(OWNER).collection('waterLogs').get());
+    });
+    it('an orgId-only LIST is DENIED', async () => {
+      await assertFails(dbFor(OWNER)
+        .collection('waterLogs').where('orgId', '==', ORG_FAM).get());
+    });
+    it('a cross-org user LIST against the family recipient is DENIED', async () => {
+      await assertFails(dbFor(STRANGER)
+        .collection('waterLogs').where('careRecipientRef', '==', F1ref).get());
+    });
+  });
+
+  // ---------------------------------------------------------------- update
+  describe('update — author or owner/admin, immutable attribution', () => {
+    it('author SUCCEEDS', async () => {
+      await assertSucceeds(dbFor(CAREGIVER).doc('waterLogs/water_upd_author').update({ amount: 12, amountFlOz: 12 }));
+    });
+    it('a SECOND caregiver is DENIED', async () => {
+      await assertFails(dbFor(CG2).doc('waterLogs/water_upd_cg2').update({ amount: 12 }));
+    });
+    it('owner SUCCEEDS', async () => {
+      await assertSucceeds(dbFor(OWNER).doc('waterLogs/water_upd_owner').update({ amount: 12 }));
+    });
+    it('admin SUCCEEDS', async () => {
+      await assertSucceeds(dbFor(ADMIN).doc('waterLogs/water_upd_admin').update({ amount: 12 }));
+    });
+    it('changing loggedByUid is DENIED', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('waterLogs/water_upd_uid').update({ loggedByUid: OWNER }));
+    });
+    it('changing orgId is DENIED', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('waterLogs/water_upd_org').update({ orgId: ORG_OTHER }));
+    });
+    it('changing careRecipientRef is DENIED', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('waterLogs/water_upd_ref').update({ careRecipientRef: W2ref }));
+    });
+    it('a future intakeAt is DENIED', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('waterLogs/water_upd_future').update({ intakeAt: future() }));
+    });
+  });
+
+  // ---------------------------------------------------------------- delete (Undo)
+  describe('delete — the dashboard Undo path: author or owner/admin only', () => {
+    it('the author may undo their own quick-add', async () => {
+      await assertSucceeds(dbFor(CAREGIVER).doc('waterLogs/water_del_author').delete());
+    });
+    it('a SECOND caregiver cannot delete another caregiver\'s entry', async () => {
+      await assertFails(dbFor(CG2).doc('waterLogs/water_del_cg2').delete());
+    });
+    it('owner of the recipient org SUCCEEDS', async () => {
+      await assertSucceeds(dbFor(OWNER).doc('waterLogs/water_del_owner').delete());
+    });
+    it('stranger (other org) is DENIED', async () => {
+      await assertFails(dbFor(STRANGER).doc('waterLogs/water_del_stranger').delete());
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // REAL APP WRITE/DELETE PATHS (consolidated pin) — the app's live code paths
 // that previously had no dedicated create/delete assertion: mealEntries create
 // (Add Meal sheet), symptomEntries create (dashboard "Add Entry" copy),
