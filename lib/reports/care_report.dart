@@ -10,11 +10,14 @@
 //
 // Which per-recipient collections can be used is fixed by what the app can
 // actually READ (see `firebase/firestore.rules`): `symptomEntries`, `careNotes`
-// and `medications` are readable; `vitalLogs`, `appointments`, `dashboardNotes`
-// and `emerencyinfo` are deny-all in the Phase-4 lockdown, so they cannot be
-// reported on at all. `carechecklist` is readable but stores no completion time
-// (only a `completed` flag and the task's `created_time`), so it cannot be
-// honestly date-ranged and is left out rather than guessed at.
+// and `medications` are readable; `dashboardNotes` and `emerencyinfo` are
+// deny-all in the Phase-4 lockdown, so they cannot be reported on at all.
+// `vitalLogs`, `waterLogs` and `appointments` are enabled but RECIPIENT-SCOPED
+// (readable only when the query filters `careRecipientRef`), and appointments
+// are deliberately out of scope for this report (a follow-up unit), so none of
+// the three is included here. `carechecklist` is readable but stores no
+// completion time (only a `completed` flag and the task's `created_time`), so it
+// cannot be honestly date-ranged and is left out rather than guessed at.
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 

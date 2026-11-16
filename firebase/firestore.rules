@@ -543,14 +543,103 @@ service cloud.firestore {
     }
 
     // ---------------------------------------------------------------------------
+    // appointments — enabled 2026-11-16 (owner-approved appointments +
+    // calendar unit, proposal appointments-calendar-proposal-2026-11-15.md §2–§4).
+    // Was a dead collection with an explicit deny; the block below is that one
+    // deny line replaced by the same recipient-scoped gate vitalLogs/waterLogs
+    // use, so there is one shape to reason about.
+    //
+    // READS are recipient-scoped for BOTH get and list, exactly as vitalLogs:
+    // the app's query must constrain careRecipientRef, so a bare collection list
+    // or an `orgId`-only query is DENIED. The read rules deliberately never
+    // mention orgId or createdByUid (see LEGACY below).
+    //
+    // WRITES: create requires the author's own uid, a non-empty title, a start
+    // time, an end not before the start, a server-stamped createdAt and an orgId
+    // strictly equal to the recipient's own org. careRecipientRef, orgId and
+    // createdByUid are immutable after create. Edits/deletes are the author's or
+    // an owner/admin of the recipient's org, resolved from careRecipientRef and
+    // never from the stored orgId, so a stale orgId can never be used to
+    // escalate.
+    //
+    // FUTURE DATES ARE ALLOWED on create and update — the whole point of an
+    // appointment, and the one deliberate difference from vitalLogs/waterLogs.
+    // Only createdAt/updatedAt are pinned to the server time.
+    //
+    // LEGACY COMPATIBILITY (owner requirement, 2026-11-16). Appointments created
+    // before orgId/createdByUid existed carry neither field. They must stay
+    // readable and editable under these rules, and must never be silently
+    // rewritten:
+    //   * READ never requires either field, so a legacy record reads exactly
+    //     like a new one (and appears in the recipient-scoped list/month query).
+    //   * UPDATE tolerates a MISSING field on the stored document: it may stay
+    //     absent (the record is left exactly as it was) or be filled in with a
+    //     value these rules verify to be true — the recipient's real org, or the
+    //     caller's own uid. A stored value is never overwritten.
+    //   * A legacy record has no recorded author, so its update is open to
+    //     whoever can already write that recipient's data (canWriteRecipientData)
+    //     rather than to a uid that was never recorded; its DELETE falls to
+    //     owner/admin, because there is no author to compare against and a
+    //     delete is not recoverable.
+    // ---------------------------------------------------------------------------
+    match /appointments/{docId} {
+      allow get:    if canAccessRecipientRef(get(resource.data.careRecipientRef).id);
+      allow list:   if canAccessRecipientRef(get(resource.data.careRecipientRef).id);
+
+      allow create: if request.resource.data.careRecipientRef is path
+        && request.resource.data.orgId is string
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.appointmentTitle is string
+        && request.resource.data.appointmentTitle.size() > 0
+        && request.resource.data.appointmentDateTime is timestamp
+        && (!('endDateTime' in request.resource.data)
+             || request.resource.data.endDateTime >= request.resource.data.appointmentDateTime)
+        && request.resource.data.createdAt == request.time
+        && canWriteRecipientData(get(request.resource.data.careRecipientRef).id)
+        && request.resource.data.orgId
+             == recipientOrgId(get(request.resource.data.careRecipientRef).id);
+
+      allow update: if canWriteRecipientData(get(resource.data.careRecipientRef).id)
+        && request.resource.data.careRecipientRef == resource.data.careRecipientRef
+        // orgId / createdByUid: immutable once stored; on a legacy record either
+        // still absent, or added with the verified-true value.
+        && (!('orgId' in resource.data)
+             ? (!('orgId' in request.resource.data)
+                || request.resource.data.orgId
+                     == recipientOrgId(get(resource.data.careRecipientRef).id))
+             : request.resource.data.orgId == resource.data.orgId)
+        && (!('createdByUid' in resource.data)
+             ? (!('createdByUid' in request.resource.data)
+                || request.resource.data.createdByUid == request.auth.uid)
+             : request.resource.data.createdByUid == resource.data.createdByUid)
+        && request.resource.data.appointmentTitle is string
+        && request.resource.data.appointmentTitle.size() > 0
+        && request.resource.data.appointmentDateTime is timestamp
+        && (!('endDateTime' in request.resource.data)
+             || request.resource.data.endDateTime >= request.resource.data.appointmentDateTime)
+        && request.resource.data.updatedAt == request.time
+        && ( !('createdByUid' in resource.data)   // legacy: no recorded author
+             || resource.data.createdByUid == request.auth.uid
+             || memberHasRole(recipientOrgId(get(resource.data.careRecipientRef).id),
+                              ['owner', 'admin']) );
+
+      allow delete: if canWriteRecipientData(get(resource.data.careRecipientRef).id)
+        && ( ('createdByUid' in resource.data
+              && resource.data.createdByUid == request.auth.uid)
+             || memberHasRole(recipientOrgId(get(resource.data.careRecipientRef).id),
+                              ['owner', 'admin']) );
+    }
+
+    // ---------------------------------------------------------------------------
     // Dead collections (Q10/Q13 — explicit deny until their domains are wired).
     // Zero live data today, zero UI readers/writers; owner-only would silently
     // allow future un-audited writes through old code paths. When a domain gets
     // wired, upgrade its block to the same recipient-org gate as the live
-    // collections — a one-block swap. The emerencyinfo typo is RETAINED (§5.4).
+    // collections — a one-block swap (vitalLogs 2026-11-13, waterLogs 2026-11-13
+    // and appointments 2026-11-16 are the swaps done so far). The emerencyinfo
+    // typo is RETAINED (§5.4).
     // ---------------------------------------------------------------------------
     match /emerencyinfo/{docId}  { allow read, write: if false; }
-    match /appointments/{docId}  { allow read, write: if false; }
     match /dashboardNotes/{docId}{ allow read, write: if false; }
     match /iconname/{docId}      { allow read, write: if false; }
   }

@@ -12,6 +12,10 @@
 const fs = require('fs');
 const path = require('path');
 const { initializeTestEnvironment, assertSucceeds, assertFails } = require('@firebase/rules-unit-testing');
+// Client-side sentinel: the appointments create/update rules pin
+// createdAt/updatedAt to the SERVER time, so every client write in this file
+// must send serverTimestamp() for those two fields.
+const { serverTimestamp } = require('@firebase/firestore');
 
 // Real rules file from the repo — NOT a hardcoded copy. This test lives at
 // firebase/tests/, the rules at firebase/firestore.rules.
@@ -391,16 +395,16 @@ describe('FAMILY CAREGIVER within recipient org (non-owner)', () => {
 
 // ---------------------------------------------------------------------------
 // DEAD / PLACEHOLDER COLLECTIONS — deny pins. The V1 consolidated decision is
-// "stay denied": emerencyinfo, appointments, dashboardNotes and iconname have
-// NO functional read/write path anywhere in lib/ (their pages are static
-// mockups / print-stubs), so they keep the Phase-4 `allow read, write: if
-// false` blocks. These pins make an accidental future enable FAIL CI even if no
-// UI work lands with it. Even the OWNER (who legitimately accesses every
-// functional collection) is denied here. (vitalLogs was enabled 2026-11-13 —
-// owner-approved v2 design — and has its own suite below.)
+// "stay denied": emerencyinfo, dashboardNotes and iconname have NO functional
+// read/write path anywhere in lib/ (their pages are static mockups /
+// print-stubs), so they keep the Phase-4 `allow read, write: if false` blocks.
+// These pins make an accidental future enable FAIL CI even if no UI work lands
+// with it. Even the OWNER (who legitimately accesses every functional
+// collection) is denied here. (vitalLogs was enabled 2026-11-13, waterLogs
+// 2026-11-13 and appointments 2026-11-16 — each has its own suite below.)
 // ---------------------------------------------------------------------------
 describe('DEAD COLLECTIONS stay denied (V1 consolidated decision)', () => {
-  const dead = ['emerencyinfo', 'appointments', 'dashboardNotes', 'iconname'];
+  const dead = ['emerencyinfo', 'dashboardNotes', 'iconname'];
   dead.forEach((col) => {
     it(`${col}: read AND write DENIED for an active owner`, async () => {
       const db = dbFor(OWNER);
@@ -824,6 +828,341 @@ describe('WATERLOGS (water tracking: recipient-scoped reads, attributed writes)'
     });
     it('stranger (other org) is DENIED', async () => {
       await assertFails(dbFor(STRANGER).doc('waterLogs/water_del_stranger').delete());
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// APPOINTMENTS — enabled 2026-11-16 (owner-approved appointments + calendar
+// unit; proposal appointments-calendar-proposal-2026-11-15.md §2–§4).
+//
+// Same access model as vitalLogs/waterLogs: recipient-scoped reads for get AND
+// list (so a bare or orgId-only list is DENIED), attributed creates
+// (createdByUid == caller, orgId == the recipient's real org), immutable
+// careRecipientRef / orgId / createdByUid, and author-or-owner/admin edits and
+// deletes. ONE deliberate difference: FUTURE DATES ARE ALLOWED, because an
+// appointment is by definition scheduled ahead of time — only createdAt /
+// updatedAt are pinned to the server time.
+//
+// LEGACY (owner requirement 2026-11-16): appointments created before orgId /
+// createdByUid existed must stay readable AND editable, and must never be
+// silently rewritten. Those cases are pinned in the last block.
+// ---------------------------------------------------------------------------
+describe('APPOINTMENTS (recipient-scoped reads, attributed writes, future dates allowed)', () => {
+  const CG2    = 'uid_appt_cg2';    // second family caregiver in org_fam
+  const ADMIN  = 'uid_appt_admin';  // admin in org_fam
+  const VIEWER = 'uid_appt_viewer'; // viewer in org_fam (read-only role)
+  const REC_A2 = 'rec_a2';          // second org_fam recipient (list scoping)
+
+  const past   = () => new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const future = () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+  let A2ref;
+
+  // A SEEDED appointment (written with rules off, so plain Dates are fine).
+  const seeded = (ref, extra) => ({
+    careRecipientRef: ref, orgId: ORG_FAM, appointmentTitle: 'Cardiology follow-up',
+    appointmentDateTime: future(), createdByUid: CAREGIVER,
+    createdAt: new Date(), updatedAt: new Date(), ...extra,
+  });
+
+  // A CLIENT-created appointment — the shape the app's create helper writes.
+  const clientAppt = (ref, extra) => ({
+    careRecipientRef: ref, orgId: ORG_FAM, appointmentTitle: 'Cardiology follow-up',
+    appointmentDateTime: future(), createdByUid: CAREGIVER,
+    createdAt: serverTimestamp(), updatedAt: serverTimestamp(), ...extra,
+  });
+
+  // A LEGACY appointment: created before orgId / createdByUid existed.
+  const legacy = (extra) => ({
+    careRecipientRef: F1ref, appointmentTitle: 'Old visit', providerName: 'Dr. Reyes',
+    appointmentDateTime: past(), createdAt: new Date(), updatedAt: new Date(), ...extra,
+  });
+
+  before(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      const set = (p, d) => db.doc(p).set(d);
+      A2ref = db.doc('careRecipients/' + REC_A2);
+      await set('careRecipients/' + REC_A2, { orgId: ORG_FAM });
+      await set('users/' + CG2,    { activeGroupId: ORG_FAM });
+      await set('users/' + ADMIN,  { activeGroupId: ORG_FAM });
+      await set('users/' + VIEWER, { activeGroupId: ORG_FAM });
+      await set(`organizations/${ORG_FAM}/members/${CG2}`,    { uid: CG2, role: 'caregiver', status: 'active' });
+      await set(`organizations/${ORG_FAM}/members/${ADMIN}`,  { uid: ADMIN, role: 'admin', status: 'active' });
+      await set(`organizations/${ORG_FAM}/members/${VIEWER}`, { uid: VIEWER, role: 'viewer', status: 'active' });
+      // readable fixtures
+      await set('appointments/appt_read1', seeded(F1ref));
+      await set('appointments/appt_a2_1',  seeded(A2ref));
+      await set('appointments/appt_prof_1', seeded(PROFref, {
+        orgId: ORG_PROF, createdByUid: PROFOWNER,
+      }));
+      // per-case docs so no test mutates another test's fixture
+      for (const id of ['appt_upd_author', 'appt_upd_cg2', 'appt_upd_owner',
+                        'appt_upd_admin', 'appt_upd_uid', 'appt_upd_org',
+                        'appt_upd_ref', 'appt_upd_future', 'appt_upd_ts',
+                        'appt_del_author', 'appt_del_cg2', 'appt_del_owner',
+                        'appt_del_stranger']) {
+        await set('appointments/' + id, seeded(F1ref));
+      }
+      // LEGACY fixtures — no orgId, no createdByUid anywhere
+      await set('appointments/appt_legacy_read',      legacy());
+      await set('appointments/appt_legacy_edit',      legacy());
+      await set('appointments/appt_legacy_backfill',  legacy());
+      await set('appointments/appt_legacy_badorg',    legacy());
+      await set('appointments/appt_legacy_badauthor', legacy());
+      await set('appointments/appt_legacy_del_cg',    legacy());
+      await set('appointments/appt_legacy_del_owner', legacy());
+    });
+  });
+
+  // ---------------------------------------------------------------- create
+  describe('create — attributed, org-matched, FUTURE dates allowed', () => {
+    it('family caregiver schedules a FUTURE appointment SUCCEEDS', async () => {
+      await assertSucceeds(dbFor(CAREGIVER).doc('appointments/appt_new_future').set(clientAppt(F1ref)));
+    });
+    it('a PAST appointment (a visit already attended) SUCCEEDS', async () => {
+      await assertSucceeds(dbFor(CAREGIVER).doc('appointments/appt_new_past').set(
+        clientAppt(F1ref, { appointmentDateTime: past() })));
+    });
+    it('an endDateTime at or after the start SUCCEEDS', async () => {
+      const start = future();
+      await assertSucceeds(dbFor(CAREGIVER).doc('appointments/appt_new_end').set(
+        clientAppt(F1ref, {
+          appointmentDateTime: start,
+          endDateTime: new Date(start.getTime() + 60 * 60 * 1000),
+        })));
+    });
+    it('an endDateTime BEFORE the start is DENIED', async () => {
+      const start = future();
+      await assertFails(dbFor(CAREGIVER).doc('appointments/appt_new_badend').set(
+        clientAppt(F1ref, {
+          appointmentDateTime: start,
+          endDateTime: new Date(start.getTime() - 60 * 60 * 1000),
+        })));
+    });
+    it('an EMPTY title is DENIED', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('appointments/appt_new_notitle').set(
+        clientAppt(F1ref, { appointmentTitle: '' })));
+    });
+    it('a missing start time is DENIED', async () => {
+      const d = clientAppt(F1ref); delete d.appointmentDateTime;
+      await assertFails(dbFor(CAREGIVER).doc('appointments/appt_new_nostart').set(d));
+    });
+    it('missing orgId is DENIED', async () => {
+      const d = clientAppt(F1ref); delete d.orgId;
+      await assertFails(dbFor(CAREGIVER).doc('appointments/appt_new_noorg').set(d));
+    });
+    it('an orgId that does not match the recipient org is DENIED', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('appointments/appt_new_wrongorg').set(
+        clientAppt(F1ref, { orgId: ORG_OTHER })));
+    });
+    it('createdByUid spoofing another user is DENIED', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('appointments/appt_new_imposter').set(
+        clientAppt(F1ref, { createdByUid: OWNER })));
+    });
+    it('a CLIENT createdAt (DateTime.now) is DENIED — createdAt is server-stamped', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('appointments/appt_new_clientts').set(
+        clientAppt(F1ref, { createdAt: new Date() })));
+    });
+    it('a cross-org user is DENIED', async () => {
+      await assertFails(dbFor(STRANGER).doc('appointments/appt_new_stranger').set(
+        clientAppt(F1ref, { orgId: ORG_OTHER, createdByUid: STRANGER })));
+    });
+    it('a viewer (read-only role) is DENIED', async () => {
+      await assertFails(dbFor(VIEWER).doc('appointments/appt_new_viewer').set(
+        clientAppt(F1ref, { createdByUid: VIEWER })));
+    });
+    it('unassigned professional staff are DENIED', async () => {
+      await assertFails(dbFor(PROFCARE).doc('appointments/appt_new_prof').set({
+        careRecipientRef: PROFref, orgId: ORG_PROF, appointmentTitle: 'Wound care',
+        appointmentDateTime: future(), createdByUid: PROFCARE,
+        createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+      }));
+    });
+    it('a grantee with a caregiver-level share SUCCEEDS', async () => {
+      await assertSucceeds(dbFor(GRANTEE).doc('appointments/appt_new_grantee').set(
+        clientAppt(F1ref, { createdByUid: GRANTEE })));
+    });
+  });
+
+  // ---------------------------------------------------------------- read
+  describe('read — recipient-scoped for get AND list', () => {
+    it('owner GET of their org\'s appointment SUCCEEDS', async () => {
+      await assertSucceeds(dbFor(OWNER).doc('appointments/appt_read1').get());
+    });
+    it('stranger GET is DENIED', async () => {
+      await assertFails(dbFor(STRANGER).doc('appointments/appt_read1').get());
+    });
+    it('grantee GET of the shared recipient\'s appointment SUCCEEDS', async () => {
+      await assertSucceeds(dbFor(GRANTEE).doc('appointments/appt_read1').get());
+    });
+    it('recipient-scoped LIST SUCCEEDS and never leaks another recipient', async () => {
+      const snap = await assertSucceeds(dbFor(OWNER)
+        .collection('appointments').where('careRecipientRef', '==', F1ref).get());
+      const ids = snap.docs.map((d) => d.id);
+      if (ids.includes('appt_a2_1') || ids.includes('appt_prof_1')) {
+        throw new Error('cross-recipient leak in appointments LIST: ' + ids.join(','));
+      }
+    });
+    it('the CALENDAR month query (recipient + date range + orderBy) SUCCEEDS', async () => {
+      const start = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const end   = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000);
+      const snap = await assertSucceeds(dbFor(OWNER)
+        .collection('appointments')
+        .where('careRecipientRef', '==', F1ref)
+        .where('appointmentDateTime', '>=', start)
+        .where('appointmentDateTime', '<', end)
+        .orderBy('appointmentDateTime', 'asc')
+        .get());
+      if (!snap.docs.some((d) => d.id === 'appt_read1')) {
+        throw new Error('month query did not return the seeded appointment');
+      }
+    });
+    it('a bare collection LIST is DENIED', async () => {
+      await assertFails(dbFor(OWNER).collection('appointments').get());
+    });
+    it('an orgId-only LIST is DENIED', async () => {
+      await assertFails(dbFor(OWNER)
+        .collection('appointments').where('orgId', '==', ORG_FAM).get());
+    });
+    it('a cross-org user LIST against the family recipient is DENIED', async () => {
+      await assertFails(dbFor(STRANGER)
+        .collection('appointments').where('careRecipientRef', '==', F1ref).get());
+    });
+  });
+
+  // ---------------------------------------------------------------- update
+  describe('update — author or owner/admin, immutable scope, future dates allowed', () => {
+    it('the author SUCCEEDS', async () => {
+      await assertSucceeds(dbFor(CAREGIVER).doc('appointments/appt_upd_author').update({
+        appointmentTitle: 'Cardiology (rescheduled)', updatedAt: serverTimestamp(),
+      }));
+    });
+    it('a SECOND caregiver is DENIED', async () => {
+      await assertFails(dbFor(CG2).doc('appointments/appt_upd_cg2').update({
+        appointmentTitle: 'Hijacked', updatedAt: serverTimestamp(),
+      }));
+    });
+    it('owner SUCCEEDS', async () => {
+      await assertSucceeds(dbFor(OWNER).doc('appointments/appt_upd_owner').update({
+        appointmentTitle: 'Cardiology (owner edit)', updatedAt: serverTimestamp(),
+      }));
+    });
+    it('admin SUCCEEDS', async () => {
+      await assertSucceeds(dbFor(ADMIN).doc('appointments/appt_upd_admin').update({
+        appointmentTitle: 'Cardiology (admin edit)', updatedAt: serverTimestamp(),
+      }));
+    });
+    it('moving the date further into the FUTURE SUCCEEDS', async () => {
+      await assertSucceeds(dbFor(CAREGIVER).doc('appointments/appt_upd_future').update({
+        appointmentDateTime: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        updatedAt: serverTimestamp(),
+      }));
+    });
+    it('changing createdByUid is DENIED', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('appointments/appt_upd_uid').update({
+        createdByUid: OWNER, updatedAt: serverTimestamp(),
+      }));
+    });
+    it('changing orgId is DENIED', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('appointments/appt_upd_org').update({
+        orgId: ORG_OTHER, updatedAt: serverTimestamp(),
+      }));
+    });
+    it('changing careRecipientRef is DENIED', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('appointments/appt_upd_ref').update({
+        careRecipientRef: A2ref, updatedAt: serverTimestamp(),
+      }));
+    });
+    it('a CLIENT updatedAt (DateTime.now) is DENIED — updatedAt is server-stamped', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('appointments/appt_upd_ts').update({
+        appointmentTitle: 'x', updatedAt: new Date(),
+      }));
+    });
+  });
+
+  // ---------------------------------------------------------------- delete
+  describe('delete — author or owner/admin only', () => {
+    it('the author may delete their own appointment', async () => {
+      await assertSucceeds(dbFor(CAREGIVER).doc('appointments/appt_del_author').delete());
+    });
+    it('a SECOND caregiver cannot delete another caregiver\'s appointment', async () => {
+      await assertFails(dbFor(CG2).doc('appointments/appt_del_cg2').delete());
+    });
+    it('owner of the recipient org SUCCEEDS', async () => {
+      await assertSucceeds(dbFor(OWNER).doc('appointments/appt_del_owner').delete());
+    });
+    it('stranger (other org) is DENIED', async () => {
+      await assertFails(dbFor(STRANGER).doc('appointments/appt_del_stranger').delete());
+    });
+  });
+
+  // ---------------------------------------------------------------- legacy
+  describe('LEGACY records (no orgId / createdByUid) stay usable', () => {
+    it('GET by an org member SUCCEEDS — reads never require the new fields', async () => {
+      await assertSucceeds(dbFor(CAREGIVER).doc('appointments/appt_legacy_read').get());
+    });
+    it('appears in the recipient-scoped LIST and the calendar month query', async () => {
+      const listed = await assertSucceeds(dbFor(OWNER)
+        .collection('appointments').where('careRecipientRef', '==', F1ref).get());
+      if (!listed.docs.some((d) => d.id === 'appt_legacy_read')) {
+        throw new Error('legacy appointment missing from the recipient-scoped list');
+      }
+      const start = new Date(Date.now() - 400 * 24 * 60 * 60 * 1000);
+      const end   = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000);
+      const windowed = await assertSucceeds(dbFor(OWNER)
+        .collection('appointments')
+        .where('careRecipientRef', '==', F1ref)
+        .where('appointmentDateTime', '>=', start)
+        .where('appointmentDateTime', '<', end)
+        .orderBy('appointmentDateTime', 'asc')
+        .get());
+      if (!windowed.docs.some((d) => d.id === 'appt_legacy_read')) {
+        throw new Error('legacy appointment missing from the calendar month query');
+      }
+    });
+    it('a caregiver may EDIT it, and the record is never silently rewritten', async () => {
+      await assertSucceeds(dbFor(CAREGIVER).doc('appointments/appt_legacy_edit').update({
+        appointmentTitle: 'Old visit (rescheduled)', updatedAt: serverTimestamp(),
+      }));
+      const snap = await assertSucceeds(dbFor(OWNER).doc('appointments/appt_legacy_edit').get());
+      const d = snap.data();
+      if ('orgId' in d || 'createdByUid' in d) {
+        throw new Error('legacy record was silently backfilled: ' + JSON.stringify(d));
+      }
+      if (d.appointmentTitle !== 'Old visit (rescheduled)') {
+        throw new Error('the edit did not land: ' + JSON.stringify(d));
+      }
+      if (d.providerName !== 'Dr. Reyes') {
+        throw new Error('unrelated data was lost on edit: ' + JSON.stringify(d));
+      }
+    });
+    it('adding orgId with the recipient\'s REAL org SUCCEEDS (verified backfill)', async () => {
+      await assertSucceeds(dbFor(CAREGIVER).doc('appointments/appt_legacy_backfill').update({
+        orgId: ORG_FAM, updatedAt: serverTimestamp(),
+      }));
+    });
+    it('adding a WRONG orgId to a legacy record is DENIED', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('appointments/appt_legacy_badorg').update({
+        orgId: ORG_OTHER, updatedAt: serverTimestamp(),
+      }));
+    });
+    it('attributing a legacy record to another uid is DENIED', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('appointments/appt_legacy_badauthor').update({
+        createdByUid: OWNER, updatedAt: serverTimestamp(),
+      }));
+    });
+    it('a stranger cannot edit a legacy record', async () => {
+      await assertFails(dbFor(STRANGER).doc('appointments/appt_legacy_read').update({
+        appointmentTitle: 'Hijacked', updatedAt: serverTimestamp(),
+      }));
+    });
+    it('a caregiver cannot DELETE a legacy record (no recorded author)', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('appointments/appt_legacy_del_cg').delete());
+    });
+    it('the owner CAN delete a legacy record', async () => {
+      await assertSucceeds(dbFor(OWNER).doc('appointments/appt_legacy_del_owner').delete());
     });
   });
 });

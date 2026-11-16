@@ -55,6 +55,20 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "appointments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "careRecipientRef",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "appointmentDateTime",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ]
 }

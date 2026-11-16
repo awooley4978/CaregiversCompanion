@@ -77,6 +77,28 @@ class AppointmentsRecord extends FirestoreRecord {
   bool get completed => _completed ?? false;
   bool hasCompleted() => _completed != null;
 
+  // "orgId" field.
+  // Added 2026-11-16 with the appointments security rules (owner-approved
+  // appointments unit, proposal §2.2): the recipient's own org, written at
+  // create and immutable afterwards. It is not the source of permission — the
+  // rules resolve access from `careRecipientRef` — it only prevents a document
+  // being written into the wrong org. Appointments created BEFORE this field
+  // existed simply do not have it; `hasOrgId()` is false and the value reads as
+  // empty. Nothing backfills or rewrites those records.
+  String? _orgId;
+  String get orgId => _orgId ?? '';
+  bool hasOrgId() => _orgId != null;
+
+  // "createdByUid" field.
+  // Added 2026-11-16 (same unit): the author's uid, written at create from the
+  // caller and immutable afterwards — what makes "author-or-owner/admin" edits
+  // and deletes possible, exactly as `loggedByUid` does for vitals and water.
+  // Absent on legacy records (hasCreatedByUid() is false); those keep working
+  // and are never silently reattributed.
+  String? _createdByUid;
+  String get createdByUid => _createdByUid ?? '';
+  bool hasCreatedByUid() => _createdByUid != null;
+
   // "createdAt" field.
   DateTime? _createdAt;
   DateTime? get createdAt => _createdAt;
@@ -100,6 +122,8 @@ class AppointmentsRecord extends FirestoreRecord {
     _notes = snapshotData['notes'] as String?;
     _followUpNeeded = snapshotData['followUpNeeded'] as bool?;
     _completed = snapshotData['completed'] as bool?;
+    _orgId = castToType<String>(snapshotData['orgId']);
+    _createdByUid = castToType<String>(snapshotData['createdByUid']);
     _createdAt = snapshotData['createdAt'] as DateTime?;
     _updatedAt = snapshotData['updatedAt'] as DateTime?;
   }
@@ -138,6 +162,19 @@ class AppointmentsRecord extends FirestoreRecord {
       reference.path.hashCode == other.reference.path.hashCode;
 }
 
+// Builds the write payload for a NEW appointment.
+//
+// `orgId` and `createdByUid` (added 2026-11-16, appointments unit §2.2) are
+// required by the security rules on create: `orgId` must equal the care
+// recipient's own org and `createdByUid` must equal the signed-in uid, so the
+// caller passes the recipient's org and the current user.
+//
+// `createdAt` / `updatedAt` are `dynamic` because the rules require the
+// server-stamped time on write (`createdAt == request.time`): pass
+// `FieldValue.serverTimestamp()` for those two. A client `DateTime.now()` is
+// still accepted by this signature (the field type is unchanged for existing
+// callers) but will be REFUSED by the rules — clock skew is exactly what the
+// server stamp removes.
 Map<String, dynamic> createAppointmentsRecordData({
   DocumentReference? careRecipientRef,
   String? appointmentTitle,
@@ -151,8 +188,10 @@ Map<String, dynamic> createAppointmentsRecordData({
   String? notes,
   bool? followUpNeeded,
   bool? completed,
-  DateTime? createdAt,
-  DateTime? updatedAt,
+  String? orgId,
+  String? createdByUid,
+  dynamic createdAt,
+  dynamic updatedAt,
 }) {
   final firestoreData = mapToFirestore(
     <String, dynamic>{
@@ -168,6 +207,8 @@ Map<String, dynamic> createAppointmentsRecordData({
       'notes': notes,
       'followUpNeeded': followUpNeeded,
       'completed': completed,
+      'orgId': orgId,
+      'createdByUid': createdByUid,
       'createdAt': createdAt,
       'updatedAt': updatedAt,
     }.withoutNulls,
@@ -194,6 +235,8 @@ class AppointmentsRecordDocumentEquality
         e1?.notes == e2?.notes &&
         e1?.followUpNeeded == e2?.followUpNeeded &&
         e1?.completed == e2?.completed &&
+        e1?.orgId == e2?.orgId &&
+        e1?.createdByUid == e2?.createdByUid &&
         e1?.createdAt == e2?.createdAt &&
         e1?.updatedAt == e2?.updatedAt;
   }
@@ -212,6 +255,8 @@ class AppointmentsRecordDocumentEquality
         e?.notes,
         e?.followUpNeeded,
         e?.completed,
+        e?.orgId,
+        e?.createdByUid,
         e?.createdAt,
         e?.updatedAt
       ]);
