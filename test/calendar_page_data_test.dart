@@ -240,8 +240,10 @@ void main() {
       expect(find.text(calendarMonthHeading(now)), findsOneWidget);
       expect(find.text('You have 2 appointments today'), findsOneWidget);
       expect(find.text(calendarDayHeading(now)), findsOneWidget);
-      expect(find.text('Cardiology Follow-up'), findsOneWidget);
-      expect(find.text('Physio session'), findsOneWidget);
+      // The agenda rows (a title can also appear on the Upcoming card, so
+      // these are matched as "at least once").
+      expect(find.text('Cardiology Follow-up'), findsWidgets);
+      expect(find.text('Physio session'), findsWidgets);
       expect(find.text('9:30 AM - 10:30 AM'), findsOneWidget);
 
       // The fabricated content is gone.
@@ -310,7 +312,7 @@ void main() {
           find.byKey(const ValueKey('calendarSearchField')), 'physio');
       await tester.pumpAndSettle();
 
-      expect(find.text('Physio session'), findsOneWidget);
+      expect(find.text('Physio session'), findsWidgets);
       expect(find.text('Cardiology Follow-up'), findsNothing);
       expect(find.text('You have 1 appointment today'), findsOneWidget);
 
@@ -391,13 +393,13 @@ void main() {
       );
 
       await pumpCalendar(tester);
-      expect(find.text('Cardiology Follow-up'), findsOneWidget);
+      expect(find.text('Cardiology Follow-up'), findsWidgets);
       expect(find.text('Dental cleaning'), findsNothing);
 
       FFAppState().selectedCareRecipient = recipientRef('r2');
       await tester.pumpAndSettle();
 
-      expect(find.text('Dental cleaning'), findsOneWidget);
+      expect(find.text('Dental cleaning'), findsWidgets);
       expect(find.text('Cardiology Follow-up'), findsNothing);
     });
   });
