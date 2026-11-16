@@ -139,8 +139,8 @@ void main() {
     expect(find.text('• $emergencyInfoNotProvided'), findsOneWidget);
     // Emergency contact name/phone and physician name/phone.
     expect(find.text(emergencyInfoNotProvided), findsWidgets);
-    // Advance directives have no field on the care profile.
-    expect(find.text(emergencyInfoNotProvided), findsWidgets);
+    // Advance directives always have an answer; an unset one is 'Unknown'.
+    expect(find.text('Unknown'), findsOneWidget);
 
     // None of the old hardcoded content is invented to fill the gaps.
     expect(find.text('James Jenkins'), findsNothing);
@@ -182,7 +182,7 @@ void main() {
     expect(printed, contains('Dr. Sarah Reed'));
     expect(printed, contains('Lisinopril 10mg - 1 tablet daily'));
     // Nothing invented, and no pharmacy (the profile holds none).
-    expect(printed, contains('Advance directives $emergencyInfoNotProvided'));
+    expect(printed, contains('Advance directives Unknown'));
     expect(printed.contains('CVS'), isFalse);
     expect(printed.contains('Fall Risk'), isFalse);
   });

@@ -9,6 +9,14 @@ import '/backend/schema/enums/enums.dart';
 import 'index.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 
+/// Advance-directive status values stored in `careRecipients` (owner-approved
+/// 2026-11-14). Stored as the wire strings below, like every other field on
+/// this record; a record that has no status (every record written before this
+/// field existed) reads as [kAdvanceDirectivesUnknown] — no migration.
+const String kAdvanceDirectivesOnFile = 'on_file';
+const String kAdvanceDirectivesNotOnFile = 'not_on_file';
+const String kAdvanceDirectivesUnknown = 'unknown';
+
 class CareRecipientsRecord extends FirestoreRecord {
   CareRecipientsRecord._(
     DocumentReference reference,
@@ -130,6 +138,19 @@ class CareRecipientsRecord extends FirestoreRecord {
   String get migrationStatus => _migrationStatus ?? '';
   bool hasMigrationStatus() => _migrationStatus != null;
 
+  // "AdvanceDirectivesStatus" field (owner-approved 2026-11-14): on_file /
+  // not_on_file / unknown. Absent (every pre-existing record) reads 'unknown'.
+  String? _advanceDirectivesStatus;
+  String get advanceDirectivesStatus =>
+      _advanceDirectivesStatus ?? kAdvanceDirectivesUnknown;
+  bool hasAdvanceDirectivesStatus() => _advanceDirectivesStatus != null;
+
+  // "AdvanceDirectivesNotes" field: optional free text (e.g. a DNR/POLST
+  // detail). Absent reads ''.
+  String? _advanceDirectivesNotes;
+  String get advanceDirectivesNotes => _advanceDirectivesNotes ?? '';
+  bool hasAdvanceDirectivesNotes() => _advanceDirectivesNotes != null;
+
   void _initializeFields() {
     _name = snapshotData['Name'] as String?;
     _conditions = getDataList(snapshotData['Conditions']);
@@ -154,6 +175,10 @@ class CareRecipientsRecord extends FirestoreRecord {
     _dateOfBirth = snapshotData['DateOfBirth'] as String?;
     _orgId = snapshotData['orgId'] as String?;
     _migrationStatus = snapshotData['migrationStatus'] as String?;
+    _advanceDirectivesStatus =
+        snapshotData['AdvanceDirectivesStatus'] as String?;
+    _advanceDirectivesNotes =
+        snapshotData['AdvanceDirectivesNotes'] as String?;
   }
 
   static CollectionReference get collection =>
@@ -193,6 +218,7 @@ class CareRecipientsRecord extends FirestoreRecord {
 Map<String, dynamic> createCareRecipientsRecordData({
   String? name,
   List<String>? conditions,
+  List<String>? allergies,
   String? photo,
   DateTime? createdAt,
   DateTime? updatedAt,
@@ -211,11 +237,14 @@ Map<String, dynamic> createCareRecipientsRecordData({
   String? dateOfBirth,
   String? orgId,
   String? migrationStatus,
+  String? advanceDirectivesStatus,
+  String? advanceDirectivesNotes,
 }) {
   final firestoreData = mapToFirestore(
     <String, dynamic>{
       'Name': name,
       'Conditions': conditions,
+      'Allergies': allergies,
       'Photo': photo,
       'CreatedAt': createdAt,
       'UpdatedAt': updatedAt,
@@ -234,6 +263,8 @@ Map<String, dynamic> createCareRecipientsRecordData({
       'DateOfBirth': dateOfBirth,
       'orgId': orgId,
       'migrationStatus': migrationStatus,
+      'AdvanceDirectivesStatus': advanceDirectivesStatus,
+      'AdvanceDirectivesNotes': advanceDirectivesNotes,
     }.withoutNulls,
   );
 
@@ -267,7 +298,9 @@ class CareRecipientsRecordDocumentEquality
         e1?.tracksMealsHydration == e2?.tracksMealsHydration &&
         e1?.dateOfBirth == e2?.dateOfBirth &&
         e1?.orgId == e2?.orgId &&
-        e1?.migrationStatus == e2?.migrationStatus;
+        e1?.migrationStatus == e2?.migrationStatus &&
+        e1?.advanceDirectivesStatus == e2?.advanceDirectivesStatus &&
+        e1?.advanceDirectivesNotes == e2?.advanceDirectivesNotes;
   }
 
   @override
@@ -292,7 +325,9 @@ class CareRecipientsRecordDocumentEquality
         e?.tracksMealsHydration,
         e?.dateOfBirth,
         e?.orgId,
-        e?.migrationStatus
+        e?.migrationStatus,
+        e?.advanceDirectivesStatus,
+        e?.advanceDirectivesNotes
       ]);
 
   @override
