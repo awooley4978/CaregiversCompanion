@@ -487,6 +487,64 @@ Future<DocumentReference<Map<String, dynamic>>> createCareRecipientForActiveGrou
   }
 }
 
+/// Updates an EXISTING careRecipients doc in [user]'s VERIFIED active group
+/// (owner-approved 2026-11-14, Emergency Info edit unit).
+///
+/// Same S1–S3 pre-flight as [createCareRecipientForActiveGroup] — fresh
+/// `users/{uid}.activeGroupId`, then [ensureOrgMembership] when it is missing,
+/// then [isActiveMember] — so an unverified caller is refused with the same
+/// [OrgAccessDeniedException] / [SaveStepException] the create path throws and
+/// the page's existing error handling works unchanged.
+///
+/// The write is `recipientRef.update(data)`, deliberately NOT `set()`: an
+/// update MERGES, so `orgId`, `migrationStatus`, `CreatedAt` and every field
+/// this form does not own (Initials, Photo, MobilityNotes, ...) survive the
+/// save by construction. The deployed rule only requires that `orgId` is
+/// unchanged, which a merged update guarantees — no rules change is needed.
+///
+/// [data] carries only the fields the editor owns; it must not include
+/// `orgId` (the caller cannot move a recipient between orgs).
+Future<void> updateCareRecipientForActiveGroup({
+  required User user,
+  required DocumentReference recipientRef,
+  required Map<String, dynamic> data,
+}) async {
+  final uid = user.uid;
+  if (uid.isEmpty) {
+    throw OrgAccessDeniedException('Sign in to save a care recipient.');
+  }
+  final String orgId;
+  try {
+    // S1: getActiveGroupId (fresh read of users/{uid}.activeGroupId).
+    final existing = await getActiveGroupId(uid);
+    if (existing != null && existing.isNotEmpty) {
+      orgId = existing;
+    } else {
+      // S2: ensureOrgMembership (restore an existing org/membership).
+      orgId = await ensureOrgMembership(user);
+    }
+  } on FirebaseException catch (e) {
+    throw SaveStepException('S1/S2', e);
+  }
+  try {
+    // S3: isActiveMember — verify active membership in [orgId] BEFORE write.
+    final active = await isActiveMember(orgId, uid);
+    if (!active) {
+      throw OrgAccessDeniedException(
+          'Your membership in this care circle could not be verified, so the '
+          'profile was not saved.');
+    }
+  } on FirebaseException catch (e) {
+    throw SaveStepException('S3', e);
+  }
+  try {
+    // S4: merged update of the fields the editor owns.
+    await recipientRef.update(data);
+  } on FirebaseException catch (e) {
+    throw SaveStepException('S4', e);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Org-scoped data loading (every load re-verifies membership — D1)
 // ---------------------------------------------------------------------------

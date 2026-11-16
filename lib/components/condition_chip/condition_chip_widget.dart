@@ -13,11 +13,20 @@ class ConditionChipWidget extends StatefulWidget {
     super.key,
     String? label,
     bool? selected,
+    this.onTap,
   })  : this.label = label ?? 'Diabetes',
         this.selected = selected ?? true;
 
   final String label;
   final bool selected;
+
+  /// When set, tapping the chip calls this INSTEAD of toggling its own
+  /// selection, so a page can drive the chip (e.g. the mutually exclusive
+  /// Advance Directives chips on Care Profile Setup, owner-approved
+  /// 2026-11-14). The page owns the selection in that case and sets
+  /// `selectedValue` on the model itself. Null (the default) keeps the
+  /// original toggle-on-tap behaviour every other use of this chip has.
+  final VoidCallback? onTap;
 
   @override
   State<ConditionChipWidget> createState() => _ConditionChipWidgetState();
@@ -64,6 +73,13 @@ class _ConditionChipWidgetState extends State<ConditionChipWidget> {
       hoverColor: Colors.transparent,
       highlightColor: Colors.transparent,
       onTap: () async {
+        // A page that drives this chip (mutually exclusive group) handles the
+        // tap itself and owns the selection.
+        final onTap = widget!.onTap;
+        if (onTap != null) {
+          onTap();
+          return;
+        }
         // Toggle this chip's selection (owner-approved 2026-09-23); the page
         // reads `selectedValue` back when it saves the care profile.
         safeSetState(() => _model.selectedValue =

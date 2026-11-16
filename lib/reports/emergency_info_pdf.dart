@@ -94,7 +94,7 @@ List<pw.Widget> _emergencyInfoWidgets(EmergencyInfoData data) => [
       for (final medication in data.medicationLines) _listLine(medication),
       pw.SizedBox(height: 10),
       _sectionHeading('Advance directives'),
-      _listLine(data.advanceDirectivesOrNotProvided),
+      _listLine(data.advanceDirectivesDisplay),
     ];
 
 pw.Widget _sectionHeading(String title) => pw.Container(

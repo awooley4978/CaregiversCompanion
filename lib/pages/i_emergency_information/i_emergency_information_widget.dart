@@ -6,6 +6,7 @@ import '/flutter_flow/flutter_flow_icon_button.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/flutter_flow_widgets.dart';
+import '/pages/b_care_profile_setup/b_care_profile_setup_widget.dart';
 import '/reports/emergency_info.dart';
 import '/reports/emergency_info_pdf.dart';
 import 'dart:ui';
@@ -120,6 +121,28 @@ class _IEmergencyInformationWidgetState
         safeSetState(() => _exporting = false);
       }
     }
+  }
+
+  /// Opens the care profile editor for the recipient this screen loaded
+  /// (owner-approved 2026-11-14), then reloads so the screen — and any PDF
+  /// exported afterwards — show the saved values.
+  Future<void> _updateEmergencyInfo() async {
+    final recipientRef = FFAppState().selectedCareRecipient;
+    if (recipientRef == null) {
+      return;
+    }
+    await context.pushNamed(
+      BCareProfileSetupWidget.routeName,
+      queryParameters: {'careRecipients': recipientRef.id},
+    );
+    if (!mounted) {
+      return;
+    }
+    safeSetState(() {
+      _info = null;
+      _loadError = null;
+    });
+    _loadFuture = _load();
   }
 
   @override
@@ -637,7 +660,7 @@ class _IEmergencyInformationWidgetState
                                               _info == null
                                                   ? 'Loading...'
                                                   : _info!
-                                                      .advanceDirectivesOrNotProvided,
+                                                      .advanceDirectivesDisplay,
                                               style: FlutterFlowTheme.of(
                                                       context)
                                                   .bodySmall
@@ -721,7 +744,15 @@ class _IEmergencyInformationWidgetState
                                   size: 'large',
                                   fullWidth: true,
                                   loading: false,
-                                  disabled: false,
+                                  // With no recipient selected there is nothing
+                                  // to edit, and the button must never fall
+                                  // through to the create path.
+                                  disabled: FFAppState().selectedCareRecipient ==
+                                      null,
+                                  onPressed: FFAppState().selectedCareRecipient ==
+                                          null
+                                      ? null
+                                      : _updateEmergencyInfo,
                                 ),
                               ),
                             ].divide(SizedBox(height: 16.0)),

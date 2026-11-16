@@ -16,6 +16,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart' show FirebaseException;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'b_care_profile_setup_model.dart';
 export 'b_care_profile_setup_model.dart';
@@ -43,9 +44,15 @@ const kCareProfileConditionChipLabels = <String>[
 /// pattern the Tracking Modules use via `switchModel.switchValue`, so the page
 /// keeps no second copy of the selection state. Top-level so its contract can
 /// be pinned in a test without rendering the whole page.
+///
+/// Owner amendment 2026-11-16: conditions are NEVER comma-split. When the
+/// 'Other' text is exactly what was loaded from the record, the stored entries
+/// are written back unchanged — so two distinct stored conditions can never be
+/// merged into one string by loading and re-saving.
 List<String> careProfileConditionsToSave(
   List<ConditionChipModel> chipModels, {
   String? otherCondition,
+  List<String> loadedOtherConditions = const [],
 }) {
   assert(
     chipModels.length == kCareProfileConditionChipLabels.length,
@@ -58,18 +65,169 @@ List<String> careProfileConditionsToSave(
         kCareProfileConditionChipLabels[i],
   ];
 
-  // 'Other / Add Your Own': a typed condition is saved too, once, without
-  // dropping the built-in chip that already covers it.
   final other = otherCondition?.trim() ?? '';
-  if (other.isNotEmpty && !conditions.contains(other)) {
-    conditions.add(other);
+  if (other.isEmpty) {
+    return conditions;
+  }
+
+  final unchanged = loadedOtherConditions.isNotEmpty &&
+      other == loadedOtherConditions.join(', ').trim();
+  final toAdd = unchanged ? loadedOtherConditions : <String>[other];
+  for (final condition in toAdd) {
+    if (condition.isNotEmpty && !conditions.contains(condition)) {
+      conditions.add(condition);
+    }
   }
 
   return conditions;
 }
 
+/// The stored conditions, split into the built-in chips they select and the
+/// custom entries that belong in the 'Other / Add Your Own' field.
+class CareProfileConditionSelection {
+  const CareProfileConditionSelection({
+    required this.chipLabels,
+    required this.otherConditions,
+  });
+
+  /// The built-in chip labels the stored record selects, in chip order.
+  final List<String> chipLabels;
+
+  /// The stored conditions that no chip covers, in stored order (untouched —
+  /// they are written back verbatim when the caregiver leaves the field as-is).
+  final List<String> otherConditions;
+
+  String get otherText => otherConditions.join(', ');
+}
+
+/// Reads a stored `Conditions` list back into the form (owner-approved
+/// 2026-11-16: the page used to never load them, so saving a profile blanked
+/// the recipient's conditions).
+CareProfileConditionSelection careProfileConditionsFromRecord(
+  List<String> stored,
+) {
+  final chips = <String>[];
+  final other = <String>[];
+  for (final condition in stored) {
+    if (condition.trim().isEmpty) {
+      continue;
+    }
+    if (kCareProfileConditionChipLabels.contains(condition)) {
+      if (!chips.contains(condition)) {
+        chips.add(condition);
+      }
+    } else {
+      other.add(condition);
+    }
+  }
+  chips.sort((a, b) => kCareProfileConditionChipLabels
+      .indexOf(a)
+      .compareTo(kCareProfileConditionChipLabels.indexOf(b)));
+  return CareProfileConditionSelection(
+    chipLabels: chips,
+    otherConditions: other,
+  );
+}
+
+/// Parses the comma-separated Allergies field into the stored `Allergies` list.
+///
+/// A value that is unchanged from what was loaded is written back exactly as
+/// stored (so legacy allergy entries are never re-split); a value the caregiver
+/// typed is split on commas, trimmed, and empty entries dropped.
+List<String> careProfileAllergiesToSave(
+  String? allergies, {
+  List<String> loadedAllergies = const [],
+}) {
+  final text = allergies?.trim() ?? '';
+  if (text.isEmpty) {
+    return const [];
+  }
+  if (loadedAllergies.isNotEmpty &&
+      text == loadedAllergies.join(', ').trim()) {
+    return List<String>.from(loadedAllergies);
+  }
+  return [
+    for (final allergy in text.split(','))
+      if (allergy.trim().isNotEmpty) allergy.trim(),
+  ];
+}
+
+/// The Advance Directives options, in the order the chips are laid out.
+const kCareProfileAdvanceDirectivesLabels = <String>[
+  'On file',
+  'Not on file',
+  'Unknown',
+];
+const kCareProfileAdvanceDirectivesValues = <String>[
+  kAdvanceDirectivesOnFile,
+  kAdvanceDirectivesNotOnFile,
+  kAdvanceDirectivesUnknown,
+];
+
+/// The caregiver-facing label for a stored Advance Directives status.
+String careProfileAdvanceDirectivesLabel(String status) {
+  final index = kCareProfileAdvanceDirectivesValues.indexOf(status);
+  return index == -1
+      ? kCareProfileAdvanceDirectivesLabels.last
+      : kCareProfileAdvanceDirectivesLabels[index];
+}
+
+/// Date formats the Date of Birth input accepts. Existing records store display
+/// strings ("14 Mar 1948"), so a stored value is ALWAYS saveable: a value that
+/// is unchanged from what was loaded is accepted verbatim and never rewritten
+/// (owner amendment 2026-11-16).
+const kCareProfileDateOfBirthFormats = <String>[
+  'MM/dd/yyyy',
+  'M/d/yyyy',
+  'yyyy-MM-dd',
+  'd MMM yyyy',
+  'd MMMM yyyy',
+  'MMM d, yyyy',
+  'MMMM d, yyyy',
+];
+
+/// Validates the Date of Birth input. Returns null when the value is acceptable
+/// (empty, unchanged from the loaded value, or a real calendar date in one of
+/// [kCareProfileDateOfBirthFormats]) and the message to show otherwise.
+///
+/// The value is only validated, never normalised: what the caregiver typed (or
+/// what was already stored) is saved exactly as-is.
+String? careProfileDateOfBirthError(String? value, {String? loadedValue}) {
+  final text = value?.trim() ?? '';
+  if (text.isEmpty) {
+    return null;
+  }
+  if (text == (loadedValue?.trim() ?? '')) {
+    return null;
+  }
+  for (final format in kCareProfileDateOfBirthFormats) {
+    try {
+      final parsed = DateFormat(format, 'en_US').parseStrict(text);
+      // A real calendar date round-trips through the same format; '02/30/1948'
+      // parses but formats back as '03/01/1948', so it is rejected.
+      if (DateFormat(format, 'en_US').format(parsed) == text) {
+        return null;
+      }
+    } on FormatException {
+      // Try the next accepted format.
+    }
+  }
+  return 'Enter the date of birth as MM/DD/YYYY (for example 03/14/1948).';
+}
+
 class BCareProfileSetupWidget extends StatefulWidget {
-  const BCareProfileSetupWidget({super.key});
+  const BCareProfileSetupWidget({
+    super.key,
+    this.careRecipients,
+  });
+
+  /// The care recipient being edited (owner-approved 2026-11-14).
+  ///
+  /// Present  -> edit that recipient: the form loads it and Save updates it.
+  /// Absent   -> today's create behaviour, unchanged. Every existing push site
+  ///             (nav menu, share menu, directory "add" card) passes nothing,
+  ///             so adding a second care recipient still works.
+  final DocumentReference? careRecipients;
 
   static String routeName = 'BCareProfileSetup';
   static String routePath = '/bCareProfileSetup';
@@ -84,12 +242,150 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
 
   final scaffoldKey = GlobalKey<ScaffoldState>();
 
+  /// Edit mode (owner-approved 2026-11-14): true while the recipient being
+  /// edited is loading, and the reason it could not be loaded. While either is
+  /// in play Save stays disabled — an unloaded form must never be savable, or
+  /// it would write blanks over a real profile.
+  bool _loadingExisting = false;
+  String? _loadError;
+
+  /// The Date of Birth validation message, shown under the field and blocking
+  /// the save until the value is a real date (owner amendment 2026-11-16).
+  String? _dateOfBirthError;
+
+  bool get _isEditing => widget.careRecipients != null;
+  bool get _saveBlocked =>
+      _isEditing && (_loadingExisting || _loadError != null);
+
   @override
   void initState() {
     super.initState();
     _model = createModel(context, () => BCareProfileSetupModel());
 
+    if (_isEditing) {
+      _loadExisting();
+    }
+
     WidgetsBinding.instance.addPostFrameCallback((_) => safeSetState(() {}));
+  }
+
+  /// Loads the recipient being edited and prefills the form.
+  ///
+  /// The text controllers are set directly: TextFieldWidget seeds its
+  /// controller from `value:` only once, in its own initState, so a later
+  /// rebuild cannot prefill it.
+  Future<void> _loadExisting() async {
+    final recipientRef = widget.careRecipients;
+    if (recipientRef == null) {
+      return;
+    }
+    safeSetState(() {
+      _loadingExisting = true;
+      _loadError = null;
+    });
+    try {
+      final recipient =
+          await CareRecipientsRecord.getDocumentOnce(recipientRef);
+      if (!mounted) {
+        return;
+      }
+      final conditions = careProfileConditionsFromRecord(recipient.conditions);
+      safeSetState(() {
+        _loadingExisting = false;
+        _loadError = null;
+
+        _model.loadedDateOfBirth = recipient.dateOfBirth;
+        _model.loadedAllergies = List<String>.from(recipient.allergies);
+        _model.loadedOtherConditions =
+            List<String>.from(conditions.otherConditions);
+        _model.advanceDirectivesStatus = recipient.advanceDirectivesStatus;
+
+        _setText(_model.textFieldNameModel, recipient.name);
+        _setText(
+            _model.textFieldDateOfBirthModel, recipient.dateOfBirth);
+        _setText(
+            _model.textFieldPrimaryModel, recipient.primaryCondition);
+        _setText(_model.textFieldAddConditionModel, conditions.otherText);
+        _setText(_model.textFieldAllergiesModel,
+            recipient.allergies.join(', '));
+        _setText(_model.textFieldPrimaryContactModel,
+            recipient.primaryCarePhysicianName);
+        _setText(_model.textFieldPrimaryPhoneModel,
+            recipient.primaryCarePhysicianPhone);
+        _setText(
+            _model.textFieldEmergencyModel, recipient.emergencyContactName);
+        _setText(
+            _model.textFieldEmergencyPhoneModel, recipient.emergencyContactPhone);
+        _setText(_model.textFieldAdvanceDirectivesNotesModel,
+            recipient.advanceDirectivesNotes);
+
+        for (var i = 0; i < kCareProfileConditionChipLabels.length; i++) {
+          _conditionChipModels[i].selectedValue =
+              conditions.chipLabels.contains(kCareProfileConditionChipLabels[i]);
+        }
+        _applyAdvanceDirectivesStatus(_model.advanceDirectivesStatus);
+
+        _model.moduleToggleModel1.switchModel.switchValue =
+            recipient.trackVitals;
+        _model.moduleToggleModel2.switchModel.switchValue =
+            recipient.trackGlucose;
+        _model.moduleToggleModel3.switchModel.switchValue =
+            recipient.trackMedication;
+        _model.moduleToggleModel4.switchModel.switchValue =
+            recipient.trackSymptoms;
+        _model.moduleToggleModel5.switchModel.switchValue =
+            recipient.tracksMealsHydration;
+      });
+    } catch (_) {
+      if (mounted) {
+        safeSetState(() {
+          _loadingExisting = false;
+          _loadError = 'Could not load this care profile. Please check your '
+              'connection and try again.';
+        });
+      }
+    }
+  }
+
+  /// Puts [text] in [field]'s controller, cursor at the end.
+  void _setText(TextFieldModel field, String text) {
+    final controller =
+        field.inputTextController ??= TextEditingController();
+    controller.text = text;
+    controller.selection =
+        TextSelection.collapsed(offset: controller.text.length);
+  }
+
+  /// The seven built-in condition chips, in layout order.
+  List<ConditionChipModel> get _conditionChipModels => [
+        _model.conditionChipModel1,
+        _model.conditionChipModel2,
+        _model.conditionChipModel3,
+        _model.conditionChipModel4,
+        _model.conditionChipModel5,
+        _model.conditionChipModel6,
+        _model.conditionChipModel7,
+      ];
+
+  /// The three Advance Directives chips, in layout order.
+  List<ConditionChipModel> get _advanceDirectivesChipModels => [
+        _model.conditionChipAdvanceDirectivesModel1,
+        _model.conditionChipAdvanceDirectivesModel2,
+        _model.conditionChipAdvanceDirectivesModel3,
+      ];
+
+  /// Selects [status] and nothing else — the three Advance Directives chips are
+  /// a mutually exclusive group.
+  void _applyAdvanceDirectivesStatus(String status) {
+    final selected = kCareProfileAdvanceDirectivesValues.contains(status)
+        ? status
+        : kAdvanceDirectivesUnknown;
+    _model.advanceDirectivesStatus = selected;
+    final chips = _advanceDirectivesChipModels;
+    for (var i = 0; i < chips.length; i++) {
+      chips[i].selectedValue =
+          kCareProfileAdvanceDirectivesValues[i] == selected;
+    }
   }
 
   @override
@@ -98,6 +394,212 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
 
     super.dispose();
   }
+
+  /// The Date of Birth to store: what was typed, except that an UNCHANGED
+  /// legacy value is written back exactly as it was stored (never rewritten).
+  String _dateOfBirthToSave() {
+    final typed = (_model.textFieldDateOfBirthModel.inputTextController?.text ??
+            '')
+        .trim();
+    final loaded = _model.loadedDateOfBirth?.trim() ?? '';
+    if (_isEditing && typed == loaded) {
+      return _model.loadedDateOfBirth ?? '';
+    }
+    return typed;
+  }
+
+  /// Saves the form: creates a new care recipient when the page was opened
+  /// without a recipient, updates the one it was opened with otherwise
+  /// (owner-approved 2026-11-14 — the same editor, never a second one).
+  Future<void> _save() async {
+    if (_saveBlocked) {
+      return;
+    }
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sign in to save a care recipient.')),
+      );
+      return;
+    }
+
+    // Date of Birth is validated before anything is written (owner amendment
+    // 2026-11-16): an invalid date blocks the save and nothing is stored.
+    final dateOfBirthError = careProfileDateOfBirthError(
+      _model.textFieldDateOfBirthModel.inputTextController?.text,
+      loadedValue: _model.loadedDateOfBirth,
+    );
+    safeSetState(() => _dateOfBirthError = dateOfBirthError);
+    if (dateOfBirthError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(dateOfBirthError)),
+      );
+      return;
+    }
+
+    final data = createCareRecipientsRecordData(
+      name: _model.textFieldNameModel.inputTextController.text,
+      dateOfBirth: _dateOfBirthToSave(),
+      conditions: careProfileConditionsToSave(
+        _conditionChipModels,
+        otherCondition: _model.textFieldAddConditionModel.inputTextController?.text,
+        loadedOtherConditions: _model.loadedOtherConditions,
+      ),
+      allergies: careProfileAllergiesToSave(
+        _model.textFieldAllergiesModel.inputTextController?.text,
+        loadedAllergies: _model.loadedAllergies,
+      ),
+      primaryCondition: _model.textFieldPrimaryModel.inputTextController.text,
+      primaryCarePhysicianName:
+          _model.textFieldPrimaryContactModel.inputTextController.text,
+      primaryCarePhysicianPhone:
+          _model.textFieldPrimaryPhoneModel.inputTextController.text,
+      emergencyContactName:
+          _model.textFieldEmergencyModel.inputTextController.text,
+      emergencyContactPhone:
+          _model.textFieldEmergencyPhoneModel.inputTextController.text,
+      trackVitals: _model.moduleToggleModel1.switchModel.switchValue,
+      trackGlucose: _model.moduleToggleModel2.switchModel.switchValue,
+      trackMedication: _model.moduleToggleModel3.switchModel.switchValue,
+      trackSymptoms: _model.moduleToggleModel4.switchModel.switchValue,
+      tracksMealsHydration: _model.moduleToggleModel5.switchModel.switchValue,
+      advanceDirectivesStatus: _model.advanceDirectivesStatus,
+      advanceDirectivesNotes: (_model
+                  .textFieldAdvanceDirectivesNotesModel
+                  .inputTextController
+                  ?.text ??
+              '')
+          .trim(),
+      // The update stamps UpdatedAt; a create keeps its previous payload
+      // (CreatedAt is written by the create helper's caller path as before).
+      updatedAt: _isEditing ? DateTime.now() : null,
+    );
+
+    try {
+      if (_isEditing) {
+        // Only the fields this form owns are sent; the merged update leaves
+        // orgId, migrationStatus, CreatedAt and every other stored field alone.
+        await updateCareRecipientForActiveGroup(
+          user: user,
+          recipientRef: widget.careRecipients!,
+          data: data,
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Care Profile saved successfully.'),
+            ),
+          );
+          // Back to wherever the editor was opened from (the Emergency Info
+          // screen), which reloads and shows the saved values.
+          context.pop();
+        }
+        return;
+      }
+
+      final createdRef = await createCareRecipientForActiveGroup(
+        user: user,
+        data: data,
+      );
+      // Make this the active care card so the rest of the app (dashboard,
+      // notes, etc.) shows the profile we just saved.
+      FFAppState().selectedCareRecipient = createdRef;
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Care Profile saved successfully.'),
+          ),
+        );
+        // Navigate to the newly created recipient's Daily Dashboard (same
+        // destination/pattern as the nav menu's "Daily Care" and the Client
+        // Directory card tap). selectedCareRecipient was set above so the
+        // dashboard opens for the new recipient, not a stale one.
+        context.pushNamed(CDailyDashboardWidget.routeName);
+      }
+    } on OrgAccessDeniedException catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message)),
+      );
+    } on SaveStepException catch (e) {
+      // A SaveStepException carries the exact step label + Firestore code +
+      // message, so the owner can read WHICH operation was denied straight
+      // from the snackbar, no devtools.
+      print('CareProfileSetup: save failed (step $e)');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not save at step ${e.step}: $e'),
+        ),
+      );
+    } catch (e) {
+      // A failed save must never destroy the entered form data: the text
+      // fields retain their controllers, and we only surface a clear message
+      // instead of wiping the form. But the failure must NOT be silent: log
+      // the real exception (Firestore code + message) so a non-membership
+      // failure (permission-denied, unavailable, invalid-argument, ...) is
+      // diagnosable instead of opaque.
+      print(
+        'CareProfileSetup: save failed (non-membership): '
+        '${e is FirebaseException ? '${e.code}: ${e.message}' : e.toString()}',
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+              'Could not save: '
+              '${e is FirebaseException ? e.code : e.runtimeType} — '
+              '${e.toString().length > 80 ? e.toString().substring(0, 80) : e.toString()}'),
+        ),
+      );
+    }
+  }
+
+  /// Edit-mode status line (loading / could-not-load) above the form.
+  Widget _editModeBanner(BuildContext context, String message) => Container(
+        decoration: BoxDecoration(
+          color: FlutterFlowTheme.of(context).info10,
+          borderRadius: BorderRadius.circular(20.0),
+          shape: BoxShape.rectangle,
+          border: Border.all(
+            color: FlutterFlowTheme.of(context).info20,
+            width: 1.0,
+          ),
+        ),
+        child: Padding(
+          padding: EdgeInsets.all(16.0),
+          child: Row(
+            mainAxisSize: MainAxisSize.max,
+            mainAxisAlignment: MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.info_outline_rounded,
+                color: FlutterFlowTheme.of(context).onSurface,
+                size: 20.0,
+              ),
+              Expanded(
+                flex: 1,
+                child: Text(
+                  message,
+                  style: FlutterFlowTheme.of(context).bodySmall.override(
+                        font: GoogleFonts.nunito(
+                          fontWeight:
+                              FlutterFlowTheme.of(context).bodySmall.fontWeight,
+                          fontStyle:
+                              FlutterFlowTheme.of(context).bodySmall.fontStyle,
+                        ),
+                        color: FlutterFlowTheme.of(context).onSurface,
+                        letterSpacing: 0.0,
+                        fontWeight:
+                            FlutterFlowTheme.of(context).bodySmall.fontWeight,
+                        fontStyle:
+                            FlutterFlowTheme.of(context).bodySmall.fontStyle,
+                        lineHeight: 1.5,
+                      ),
+                ),
+              ),
+            ].divide(SizedBox(width: 16.0)),
+          ),
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -306,6 +808,13 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
                           mainAxisAlignment: MainAxisAlignment.start,
                           crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
+                            // Edit mode only: the profile is loading, or it
+                            // could not be loaded and Save stays disabled.
+                            if (_loadingExisting)
+                              _editModeBanner(
+                                  context, 'Loading this care profile...'),
+                            if (_loadError != null)
+                              _editModeBanner(context, _loadError!),
                             Column(
                               mainAxisSize: MainAxisSize.min,
                               mainAxisAlignment: MainAxisAlignment.start,
@@ -353,6 +862,34 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
                                     onSubmit: '',
                                     variant: 'outlined',
                                     error: false,
+                                  ),
+                                ),
+                                // Date of Birth (owner-approved 2026-11-14):
+                                // a validated date input on the existing
+                                // DateOfBirth field. Existing stored values are
+                                // loaded verbatim and saved verbatim.
+                                wrapWithModel(
+                                  model: _model.textFieldDateOfBirthModel,
+                                  updateCallback: () => safeSetState(() {}),
+                                  child: TextFieldWidget(
+                                    label: 'Date of Birth',
+                                    labelPresent: true,
+                                    helper: _dateOfBirthError ?? '',
+                                    helperPresent: _dateOfBirthError != null,
+                                    leadingIcon: Icon(
+                                      Icons.cake_outlined,
+                                      color: FlutterFlowTheme.of(context)
+                                          .primaryText,
+                                      size: 24.0,
+                                    ),
+                                    leadingIconPresent: true,
+                                    trailingIconPresent: false,
+                                    hint: 'MM/DD/YYYY',
+                                    value: '',
+                                    onChange: '',
+                                    onSubmit: '',
+                                    variant: 'outlined',
+                                    error: _dateOfBirthError != null,
                                   ),
                                 ),
                                 wrapWithModel(
@@ -534,6 +1071,34 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
                                     onChange: '',
                                     onSubmit: '',
                                     variant: 'ghost',
+                                    error: false,
+                                  ),
+                                ),
+                                // Allergies (owner-approved 2026-11-14): the
+                                // create helper could not write this field at
+                                // all, so the Emergency Info allergy badges had
+                                // no way to be filled in.
+                                wrapWithModel(
+                                  model: _model.textFieldAllergiesModel,
+                                  updateCallback: () => safeSetState(() {}),
+                                  child: TextFieldWidget(
+                                    label: 'Allergies',
+                                    labelPresent: true,
+                                    helper: 'Separate each allergy with a comma',
+                                    helperPresent: true,
+                                    leadingIcon: Icon(
+                                      Icons.warning_amber_rounded,
+                                      color: FlutterFlowTheme.of(context)
+                                          .primaryText,
+                                      size: 24.0,
+                                    ),
+                                    leadingIconPresent: true,
+                                    trailingIconPresent: false,
+                                    hint: 'e.g. Penicillin, Latex',
+                                    value: '',
+                                    onChange: '',
+                                    onSubmit: '',
+                                    variant: 'outlined',
                                     error: false,
                                   ),
                                 ),
@@ -859,146 +1424,171 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
                                 ),
                               ].divide(SizedBox(height: 16.0)),
                             ),
+                            // Advance Directives (owner-approved 2026-11-14): an
+                            // optional three-value status plus optional notes,
+                            // on the new AdvanceDirectivesStatus /
+                            // AdvanceDirectivesNotes fields. A record with no
+                            // status reads as 'Unknown'.
+                            Column(
+                              mainAxisSize: MainAxisSize.min,
+                              mainAxisAlignment: MainAxisAlignment.start,
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Text(
+                                  'Advance Directives',
+                                  style: FlutterFlowTheme.of(context)
+                                      .titleMedium
+                                      .override(
+                                        font: GoogleFonts.dmSans(
+                                          fontWeight: FontWeight.bold,
+                                          fontStyle:
+                                              FlutterFlowTheme.of(context)
+                                                  .titleMedium
+                                                  .fontStyle,
+                                        ),
+                                        letterSpacing: 0.0,
+                                        fontWeight: FontWeight.bold,
+                                        fontStyle: FlutterFlowTheme.of(context)
+                                            .titleMedium
+                                            .fontStyle,
+                                        lineHeight: 1.45,
+                                      ),
+                                ),
+                                Container(
+                                  decoration: BoxDecoration(
+                                    color: FlutterFlowTheme.of(context)
+                                        .secondaryBackground,
+                                    borderRadius: BorderRadius.circular(28.0),
+                                    shape: BoxShape.rectangle,
+                                    border: Border.all(
+                                      color: FlutterFlowTheme.of(context)
+                                          .alternate,
+                                      width: 1.0,
+                                    ),
+                                  ),
+                                  child: Padding(
+                                    padding: EdgeInsets.all(24.0),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        Wrap(
+                                          spacing: 8.0,
+                                          runSpacing: 8.0,
+                                          alignment: WrapAlignment.start,
+                                          crossAxisAlignment:
+                                              WrapCrossAlignment.start,
+                                          direction: Axis.horizontal,
+                                          runAlignment: WrapAlignment.start,
+                                          verticalDirection:
+                                              VerticalDirection.down,
+                                          clipBehavior: Clip.none,
+                                          children: [
+                                            wrapWithModel(
+                                              model: _model
+                                                  .conditionChipAdvanceDirectivesModel1,
+                                              updateCallback: () =>
+                                                  safeSetState(() {}),
+                                              child: ConditionChipWidget(
+                                                label:
+                                                    kCareProfileAdvanceDirectivesLabels[
+                                                        0],
+                                                selected: _model
+                                                        .advanceDirectivesStatus ==
+                                                    kCareProfileAdvanceDirectivesValues[
+                                                        0],
+                                                onTap: () => safeSetState(() =>
+                                                    _applyAdvanceDirectivesStatus(
+                                                        kCareProfileAdvanceDirectivesValues[
+                                                            0])),
+                                              ),
+                                            ),
+                                            wrapWithModel(
+                                              model: _model
+                                                  .conditionChipAdvanceDirectivesModel2,
+                                              updateCallback: () =>
+                                                  safeSetState(() {}),
+                                              child: ConditionChipWidget(
+                                                label:
+                                                    kCareProfileAdvanceDirectivesLabels[
+                                                        1],
+                                                selected: _model
+                                                        .advanceDirectivesStatus ==
+                                                    kCareProfileAdvanceDirectivesValues[
+                                                        1],
+                                                onTap: () => safeSetState(() =>
+                                                    _applyAdvanceDirectivesStatus(
+                                                        kCareProfileAdvanceDirectivesValues[
+                                                            1])),
+                                              ),
+                                            ),
+                                            wrapWithModel(
+                                              model: _model
+                                                  .conditionChipAdvanceDirectivesModel3,
+                                              updateCallback: () =>
+                                                  safeSetState(() {}),
+                                              child: ConditionChipWidget(
+                                                label:
+                                                    kCareProfileAdvanceDirectivesLabels[
+                                                        2],
+                                                selected: _model
+                                                        .advanceDirectivesStatus ==
+                                                    kCareProfileAdvanceDirectivesValues[
+                                                        2],
+                                                onTap: () => safeSetState(() =>
+                                                    _applyAdvanceDirectivesStatus(
+                                                        kCareProfileAdvanceDirectivesValues[
+                                                            2])),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        wrapWithModel(
+                                          model: _model
+                                              .textFieldAdvanceDirectivesNotesModel,
+                                          updateCallback: () =>
+                                              safeSetState(() {}),
+                                          child: TextFieldWidget(
+                                            label: 'Advance Directives Notes',
+                                            labelPresent: true,
+                                            helper:
+                                                'Optional — e.g. DNR or POLST details',
+                                            helperPresent: true,
+                                            leadingIcon: Icon(
+                                              Icons.description_outlined,
+                                              color:
+                                                  FlutterFlowTheme.of(context)
+                                                      .primaryText,
+                                              size: 24.0,
+                                            ),
+                                            leadingIconPresent: true,
+                                            trailingIconPresent: false,
+                                            hint: 'Add a note',
+                                            value: '',
+                                            onChange: '',
+                                            onSubmit: '',
+                                            variant: 'outlined',
+                                            error: false,
+                                          ),
+                                        ),
+                                      ].divide(SizedBox(height: 16.0)),
+                                    ),
+                                  ),
+                                ),
+                              ].divide(SizedBox(height: 16.0)),
+                            ),
                             InkWell(
                               splashColor: Colors.transparent,
                               focusColor: Colors.transparent,
                               hoverColor: Colors.transparent,
                               highlightColor: Colors.transparent,
-                              onTap: () async {
-                                final user =
-                                    FirebaseAuth.instance.currentUser;
-                                if (user == null) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                          'Sign in to save a care recipient.'),
-                                    ),
-                                  );
-                                  return;
-                                }
-                                try {
-                                  final createdRef =
-                                      await createCareRecipientForActiveGroup(
-                                    user: user,
-                                    data: createCareRecipientsRecordData(
-                                      name: _model.textFieldNameModel
-                                          .inputTextController.text,
-                                      conditions: careProfileConditionsToSave(
-                                        [
-                                          _model.conditionChipModel1,
-                                          _model.conditionChipModel2,
-                                          _model.conditionChipModel3,
-                                          _model.conditionChipModel4,
-                                          _model.conditionChipModel5,
-                                          _model.conditionChipModel6,
-                                          _model.conditionChipModel7,
-                                        ],
-                                        otherCondition: _model
-                                            .textFieldAddConditionModel
-                                            .inputTextController
-                                            ?.text,
-                                      ),
-                                      primaryCondition: _model
-                                          .textFieldPrimaryModel
-                                          .inputTextController
-                                          .text,
-                                      primaryCarePhysicianName: _model
-                                          .textFieldPrimaryContactModel
-                                          .inputTextController
-                                          .text,
-                                      primaryCarePhysicianPhone: _model
-                                          .textFieldPrimaryPhoneModel
-                                          .inputTextController
-                                          .text,
-                                      emergencyContactName: _model
-                                          .textFieldEmergencyModel
-                                          .inputTextController
-                                          .text,
-                                      emergencyContactPhone: _model
-                                          .textFieldEmergencyPhoneModel
-                                          .inputTextController
-                                          .text,
-                                      trackVitals: _model.moduleToggleModel1
-                                          .switchModel.switchValue,
-                                      trackGlucose: _model.moduleToggleModel2
-                                          .switchModel.switchValue,
-                                      trackMedication: _model
-                                          .moduleToggleModel3
-                                          .switchModel
-                                          .switchValue,
-                                      trackSymptoms: _model.moduleToggleModel4
-                                          .switchModel.switchValue,
-                                      tracksMealsHydration: _model
-                                          .moduleToggleModel5
-                                          .switchModel
-                                          .switchValue,
-                                    ),
-                                  );
-                                  // Make this the active care card so the rest
-                                  // of the app (dashboard, notes, etc.) shows
-                                  // the profile we just saved.
-                                  FFAppState().selectedCareRecipient =
-                                      createdRef;
-                                  if (context.mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                            'Care Profile saved successfully.'),
-                                      ),
-                                    );
-                                    // Navigate to the newly created
-                                    // recipient's Daily Dashboard (same
-                                    // destination/pattern as the nav menu's
-                                    // "Daily Care" and the Client Directory
-                                    // card tap). selectedCareRecipient was set
-                                    // above so the dashboard opens for the new
-                                    // recipient, not a stale one.
-                                    context.pushNamed(
-                                        CDailyDashboardWidget.routeName);
-                                  }
-                                } on OrgAccessDeniedException catch (e) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text(e.message)),
-                                  );
-                                } on SaveStepException catch (e) {
-                                  // A SaveStepException carries the exact step
-                                  // label + Firestore code + message, so the
-                                  // owner can read WHICH operation was denied
-                                  // straight from the snackbar, no devtools.
-                                  print(
-                                    'CareProfileSetup: save failed (step $e)',
-                                  );
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                          'Could not save at step ${e.step}: $e'),
-                                    ),
-                                  );
-                                } catch (e) {
-                                  // A failed save must never destroy the
-                                  // entered form data: the text fields retain
-                                  // their controllers, and we only surface a
-                                  // clear message instead of wiping the form.
-                                  // But the failure must NOT be silent: log the
-                                  // real exception (Firestore code + message)
-                                  // so a non-membership failure (permission-
-                                  // denied, unavailable, invalid-argument, ...)
-                                  // is diagnosable instead of opaque.
-                                  print(
-                                    'CareProfileSetup: save failed '
-                                    '(non-membership): '
-                                    '${e is FirebaseException ? '${e.code}: ${e.message}' : e.toString()}',
-                                  );
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                          'Could not save: '
-                                          '${e is FirebaseException ? e.code : e.runtimeType} — '
-                                          '${e.toString().length > 80 ? e.toString().substring(0, 80) : e.toString()}'),
-                                    ),
-                                  );
-                                }
-                              },
+                              // Save is blocked while an existing profile is
+                              // loading (or failed to load) so an unloaded form
+                              // can never write blanks over a real profile.
+                              onTap: _saveBlocked ? null : _save,
                               child: wrapWithModel(
                                 model: _model.buttonModel,
                                 updateCallback: () => safeSetState(() {}),
@@ -1010,7 +1600,7 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
                                   size: 'small',
                                   fullWidth: false,
                                   loading: false,
-                                  disabled: false,
+                                  disabled: _saveBlocked,
                                 ),
                               ),
                             ),

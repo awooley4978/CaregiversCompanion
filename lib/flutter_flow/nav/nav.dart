@@ -111,7 +111,19 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
         FFRoute(
           name: BCareProfileSetupWidget.routeName,
           path: BCareProfileSetupWidget.routePath,
-          builder: (context, params) => BCareProfileSetupWidget(),
+          // Optional care recipient (owner-approved 2026-11-14): present ->
+          // edit that recipient, absent -> create a new one.
+          asyncParams: {
+            'careRecipients':
+                getDoc(['careRecipients'], CareRecipientsRecord.fromSnapshot),
+          },
+          builder: (context, params) => BCareProfileSetupWidget(
+            careRecipients: (params.getParam(
+              'careRecipients',
+              ParamType.Document,
+            ) as CareRecipientsRecord?)
+                ?.reference,
+          ),
         ),
         FFRoute(
           name: CDailyDashboardWidget.routeName,

@@ -48,6 +48,8 @@ class EmergencyInfoData {
     required this.primaryCarePhysicianName,
     required this.primaryCarePhysicianPhone,
     required this.medications,
+    required this.advanceDirectivesStatus,
+    required this.advanceDirectivesNotes,
     required this.generatedAt,
   });
 
@@ -62,12 +64,15 @@ class EmergencyInfoData {
   final String primaryCarePhysicianName;
   final String primaryCarePhysicianPhone;
   final List<EmergencyInfoMedication> medications;
-  final DateTime generatedAt;
 
-  /// The care profile has no advance-directive field, so this is always empty
-  /// today — it renders as [emergencyInfoNotProvided] on both surfaces rather
-  /// than the DNR line this screen used to invent.
-  static const String advanceDirectives = '';
+  /// The care profile's Advance Directives status: 'on_file', 'not_on_file' or
+  /// 'unknown' (owner-approved 2026-11-14). A profile saved before the field
+  /// existed reads 'unknown' — a real answer, not a missing one.
+  final String advanceDirectivesStatus;
+
+  /// Optional free-text detail stored with the status.
+  final String advanceDirectivesNotes;
+  final DateTime generatedAt;
 
   /// [value], or [emergencyInfoNotProvided] when it is blank.
   static String orNotProvided(String value) {
@@ -85,8 +90,14 @@ class EmergencyInfoData {
       orNotProvided(primaryCarePhysicianName);
   String get primaryCarePhysicianPhoneOrNotProvided =>
       orNotProvided(primaryCarePhysicianPhone);
-  String get advanceDirectivesOrNotProvided =>
-      orNotProvided(advanceDirectives);
+  /// 'On file' / 'Not on file' / 'Unknown', with the notes appended when the
+  /// caregiver recorded any. Never 'Not provided': the status always has an
+  /// answer, and Unknown is one of them.
+  String get advanceDirectivesDisplay {
+    final status = advanceDirectivesStatusLabel(advanceDirectivesStatus);
+    final notes = advanceDirectivesNotes.trim();
+    return notes.isEmpty ? status : '$status — $notes';
+  }
 
   /// The medication lines to print, or a single 'Not provided' line.
   List<String> get medicationLines {
@@ -161,6 +172,8 @@ class EmergencyInfoData {
       emergencyContactPhone: recipient.emergencyContactPhone.trim(),
       primaryCarePhysicianName: recipient.primaryCarePhysicianName.trim(),
       primaryCarePhysicianPhone: recipient.primaryCarePhysicianPhone.trim(),
+      advanceDirectivesStatus: recipient.advanceDirectivesStatus,
+      advanceDirectivesNotes: recipient.advanceDirectivesNotes.trim(),
       medications: medications
           .map((record) => EmergencyInfoMedication(
                 name: record.medicationName.trim(),
@@ -170,6 +183,18 @@ class EmergencyInfoData {
           .toList(),
       generatedAt: generatedAt ?? DateTime.now(),
     );
+  }
+}
+
+/// The caregiver-facing label for a stored Advance Directives status.
+String advanceDirectivesStatusLabel(String status) {
+  switch (status.trim()) {
+    case 'on_file':
+      return 'On file';
+    case 'not_on_file':
+      return 'Not on file';
+    default:
+      return 'Unknown';
   }
 }
 
