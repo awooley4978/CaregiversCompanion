@@ -242,6 +242,14 @@ class MemoryFirestorePlatform extends FirebaseFirestorePlatform {
   /// Test helper: let writes succeed again.
   void clearWriteError() => writeError = null;
 
+  /// Test helper: when set, every QUERY read throws this error — the stand-in
+  /// for a Firestore rules denial or a missing composite index, so a screen's
+  /// honest "could not load" state can be exercised. Null = reads succeed.
+  Object? queryError;
+
+  /// Test helper: let query reads succeed again.
+  void clearQueryError() => queryError = null;
+
   void checkWritesAllowed() {
     final error = writeError;
     if (error != null) {
@@ -540,6 +548,10 @@ class _MemoryQuery extends QueryPlatform {
   @override
   Future<QuerySnapshotPlatform> get(
       [GetOptions options = const GetOptions()]) async {
+    final error = _store.queryError;
+    if (error != null) {
+      throw error;
+    }
     return _run();
   }
 

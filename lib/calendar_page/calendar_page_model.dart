@@ -34,6 +34,12 @@ class CalendarPageModel extends FlutterFlowModel<CalendarPageWidget> {
   // Model for EventItem.
   late EventItemModel eventItemModel3;
 
+  //  State field(s) for the Calendar search field (client-side filter of the
+  //  loaded appointments — appointments unit, part 2).
+  FocusNode? textFieldFocusNode;
+  TextEditingController? textController;
+  String? Function(BuildContext, String?)? textControllerValidator;
+
   @override
   void initState(BuildContext context) {
     calendarDayModel1 = createModel(context, () => CalendarDayModel());
@@ -50,6 +56,8 @@ class CalendarPageModel extends FlutterFlowModel<CalendarPageWidget> {
 
   @override
   void dispose() {
+    textFieldFocusNode?.dispose();
+    textController?.dispose();
     calendarDayModel1.dispose();
     calendarDayModel2.dispose();
     calendarDayModel3.dispose();
