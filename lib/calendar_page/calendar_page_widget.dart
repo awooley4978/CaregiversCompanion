@@ -43,7 +43,12 @@ export 'calendar_page_model.dart';
 
 /// Calendar with different colored dot over selected day
 class CalendarPageWidget extends StatefulWidget {
-  const CalendarPageWidget({super.key});
+  const CalendarPageWidget({super.key, this.now});
+
+  /// The instant "today" is measured from. `null` (the app's own route) means
+  /// the device clock; tests pass a fixed instant so the page can never depend
+  /// on the wall clock or on the machine's time zone.
+  final DateTime? now;
 
   static String routeName = 'CalendarPage';
   static String routePath = '/calendarPage';
@@ -66,7 +71,11 @@ class _CalendarPageWidgetState extends State<CalendarPageWidget> {
   bool _searchVisible = false;
 
   /// The day the agenda is showing. Device-local, midnight.
-  DateTime _selectedDay = appointmentToday();
+  late DateTime _selectedDay;
+
+  /// The current instant: the injected one when there is one, else the device
+  /// clock. Every "today"/"upcoming" decision on this page goes through here.
+  DateTime get _now => widget.now ?? DateTime.now();
 
   /// Bumped on every load; a response carrying an older token belongs to a
   /// previously selected recipient and is thrown away.
@@ -76,6 +85,8 @@ class _CalendarPageWidgetState extends State<CalendarPageWidget> {
   void initState() {
     super.initState();
     _model = createModel(context, () => CalendarPageModel());
+
+    _selectedDay = appointmentToday(_now);
 
     FFAppState().addListener(_onAppStateChanged);
     _load();
@@ -226,12 +237,12 @@ class _CalendarPageWidgetState extends State<CalendarPageWidget> {
     _model.textController ??= TextEditingController();
     _model.textFieldFocusNode ??= FocusNode();
 
-    final today = appointmentToday();
+    final today = appointmentToday(_now);
     final selectedDay = _selectedDay;
     final visible = _visibleAppointments;
     final dayAppointments = appointmentsOnDay(visible, selectedDay);
     final searchTerm = _searchTerm;
-    final upcoming = nextUpcomingAppointment(visible, DateTime.now());
+    final upcoming = nextUpcomingAppointment(visible, _now);
     final isTodaySelected = isSameAppointmentDay(selectedDay, today);
     final week = weekDaysFor(selectedDay);
     final dayModels = [
@@ -1075,7 +1086,8 @@ class _CalendarPageWidgetState extends State<CalendarPageWidget> {
                                                 Text(
                                                   appointmentWhenLabel(
                                                       upcoming!
-                                                          .appointmentDateTime!),
+                                                          .appointmentDateTime!,
+                                                      now: _now),
                                                   key: const ValueKey(
                                                       'calendarUpcomingWhen'),
                                                   style: FlutterFlowTheme.of(
