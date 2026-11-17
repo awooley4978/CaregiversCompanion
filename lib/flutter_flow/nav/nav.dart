@@ -17,6 +17,7 @@ import 'serialization_util.dart';
 
 import '/index.dart';
 import '/pages/assignment_ended/assignment_ended_widget.dart';
+import '/pages/appointment_form/appointment_form_widget.dart';
 
 export 'package:go_router/go_router.dart';
 export 'serialization_util.dart';
@@ -188,6 +189,28 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
           name: CalendarPageWidget.routeName,
           path: CalendarPageWidget.routePath,
           builder: (context, params) => CalendarPageWidget(),
+        ),
+        // One appointment form, two entry points (appointments unit, part 3):
+        // present `appointments` -> edit that document; absent -> create one
+        // for `careRecipient` (defaulting to the app-wide selection) on
+        // `initialDate` (the Calendar's selected day).
+        FFRoute(
+          name: AppointmentFormWidget.routeName,
+          path: AppointmentFormWidget.routePath,
+          builder: (context, params) => AppointmentFormWidget(
+            appointments: params.getParam(
+              'appointments',
+              ParamType.DocumentReference,
+              collectionNamePath: ['appointments'],
+            ) as DocumentReference?,
+            careRecipient: params.getParam(
+              'careRecipient',
+              ParamType.DocumentReference,
+              collectionNamePath: ['careRecipients'],
+            ) as DocumentReference?,
+            initialDate:
+                params.getParam('initialDate', ParamType.DateTime) as DateTime?,
+          ),
         ),
         FFRoute(
           name: AuthLoginWidget.routeName,

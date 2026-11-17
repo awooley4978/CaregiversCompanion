@@ -12,19 +12,24 @@ export 'question_card_model.dart';
 class QuestionCardWidget extends StatefulWidget {
   const QuestionCardWidget({
     super.key,
-    String? category,
+    this.category,
     String? question,
-    bool? answered,
+    this.answered,
     String? priority,
-  })  : this.category = category ?? 'Medication',
-        this.question =
+  })  : this.question =
             question ?? 'Should we adjust the morning dosage of Lisinopril?',
-        this.answered = answered ?? true,
         this.priority = priority ?? 'high';
 
-  final String category;
+  /// The category chip's label, or null to render NO chip.
+  ///
+  /// `questionsToAsk` stores question text only — there is no category, no
+  /// "answered" flag and no priority behind a real appointment question
+  /// (appointments unit, proposal §5), so Doctor Visit Prep passes null and the
+  /// card shows the question and nothing else. The chip, the status line and
+  /// the inert 'Edit' button exist only when a caller supplies their values.
+  final String? category;
   final String question;
-  final bool answered;
+  final bool? answered;
   final String priority;
 
   @override
@@ -78,11 +83,15 @@ class _QuestionCardWidgetState extends State<QuestionCardWidget> {
                 mainAxisAlignment: MainAxisAlignment.start,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Row(
-                    mainAxisSize: MainAxisSize.max,
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
+                  // The category chip and the priority pin exist only when a
+                  // caller supplies a category: a real appointment question has
+                  // neither, so nothing is invented for it.
+                  if (widget!.category != null)
+                    Row(
+                      mainAxisSize: MainAxisSize.max,
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
                       Container(
                         decoration: BoxDecoration(
                           color: valueOrDefault<Color>(
@@ -177,20 +186,25 @@ class _QuestionCardWidgetState extends State<QuestionCardWidget> {
                           lineHeight: 1.6,
                         ),
                   ),
-                  Divider(
-                    height: 16.0,
-                    thickness: 1.0,
+                  // The status line and the (inert) Edit button exist only when
+                  // a caller supplies `answered` — there is no such flag behind
+                  // a stored question, so the card shows the question alone.
+                  if (widget!.answered != null)
+                    Divider(
+                      height: 16.0,
+                      thickness: 1.0,
                     indent: 0.0,
                     endIndent: 0.0,
                     color: FlutterFlowTheme.of(context).alternate,
                   ),
-                  Row(
-                    mainAxisSize: MainAxisSize.max,
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
+                  if (widget!.answered != null)
+                    Row(
+                      mainAxisSize: MainAxisSize.max,
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
                         mainAxisAlignment: MainAxisAlignment.start,
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
