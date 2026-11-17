@@ -86,7 +86,16 @@ void main() {
             .orderBy('appointmentDateTime'),
       );
 
-  final now = DateTime.now();
+  // A FIXED local instant — Friday, 20 November 2026, 4:00 PM. Every date below
+  // is derived from it and the page is handed the same instant, so this file
+  // never depends on the wall clock or on the machine's time zone. (Before this
+  // the suite ran on `DateTime.now()`, so at 05:30 the 09:30 appointment was
+  // still in the future: it appeared on the Upcoming card as well as in the
+  // agenda, and "tomorrow's" visit was no longer the next upcoming one.)
+  //
+  // 4:00 PM is deliberately after both of today's seeded times, so today's
+  // appointments are in the past and tomorrow's is the next upcoming one.
+  final now = DateTime(2026, 11, 20, 16, 0);
   final todayAt0930 = DateTime(now.year, now.month, now.day, 9, 30);
   final todayAt1400 = DateTime(now.year, now.month, now.day, 14, 0);
   final tomorrowAt1000 = DateTime(now.year, now.month, now.day, 10, 0)
@@ -98,7 +107,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(const MaterialApp(home: CalendarPageWidget()));
+    await tester.pumpWidget(MaterialApp(home: CalendarPageWidget(now: now)));
     await tester.pumpAndSettle();
   }
 
@@ -257,7 +266,8 @@ void main() {
 
       // The Upcoming card is the same real record, never a placeholder.
       expect(find.text('Hospice nurse visit'), findsOneWidget);
-      expect(find.text(appointmentWhenLabel(tomorrowAt1000)), findsOneWidget);
+      expect(find.text(appointmentWhenLabel(tomorrowAt1000, now: now)),
+          findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 
@@ -304,6 +314,8 @@ void main() {
       await seedAppointment(title: 'Physio session', start: todayAt1400);
 
       await pumpCalendar(tester);
+      // Once: 9:30 AM has already passed at the fixed 4:00 PM, so it is the
+      // agenda row only and not also the next upcoming appointment.
       expect(find.text('Cardiology Follow-up'), findsOneWidget);
 
       await tester.tap(find.byKey(const ValueKey('calendarSearchButton')));
@@ -320,6 +332,35 @@ void main() {
           find.byKey(const ValueKey('calendarSearchField')), 'dentist');
       await tester.pumpAndSettle();
       expect(find.text(calendarNoAppointmentsMatchSearch), findsOneWidget);
+    });
+
+    testWidgets('an appointment later today is in the agenda and Upcoming both',
+        (tester) async {
+      // This overlap is BY DESIGN, not a duplicate-render bug: the agenda lists
+      // the selected day, the Upcoming card shows the next appointment that has
+      // not started yet. The two surfaces show the same record whenever that
+      // record is later today. The old wall-clock tests ran at whatever time CI
+      // happened to build and mistook this for a regression.
+      await seedRecipient();
+      FFAppState().selectedCareRecipient = recipientRef();
+      await seedAppointment(
+        title: 'Evening check-in',
+        start: DateTime(now.year, now.month, now.day, 18, 0),
+      );
+
+      await pumpCalendar(tester);
+
+      expect(find.text('You have 1 appointment today'), findsOneWidget);
+      // Once in the day agenda, once on the Upcoming card.
+      expect(find.text('Evening check-in'), findsNWidgets(2));
+      expect(
+        tester
+            .widget<Text>(find.byKey(const ValueKey('calendarUpcomingTitle')))
+            .data,
+        'Evening check-in',
+      );
+      expect(find.text('Today at 6:00 PM'), findsOneWidget);
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets('an empty day and an empty schedule both say so honestly',
