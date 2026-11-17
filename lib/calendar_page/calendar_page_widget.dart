@@ -33,6 +33,7 @@ import '/flutter_flow/flutter_flow_icon_button.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/flutter_flow_widgets.dart';
+import '/pages/appointment_form/appointment_form_widget.dart';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -277,9 +278,22 @@ class _CalendarPageWidgetState extends State<CalendarPageWidget> {
         key: scaffoldKey,
         backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
         floatingActionButton: FloatingActionButton.extended(
-          onPressed: () {
-            // Part 3 of the appointments unit opens the appointment form here.
-            print('FAB pressed ...');
+          onPressed: () async {
+            // "New Event" (appointments unit, part 3): the ONE appointment form
+            // in CREATE mode, pre-filled with the selected day and the selected
+            // care recipient. On return the page reloads, so the new event
+            // appears in the strip, the agenda and the Upcoming card.
+            final recipientRef = _currentRecipientRef;
+            await context.pushNamed(
+              AppointmentFormWidget.routeName,
+              extra: {
+                if (recipientRef != null) 'careRecipient': recipientRef,
+                'initialDate': _selectedDay,
+              },
+            );
+            if (mounted) {
+              await _load();
+            }
           },
           backgroundColor: FlutterFlowTheme.of(context).primary,
           icon: Icon(
