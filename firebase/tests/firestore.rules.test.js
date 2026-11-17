@@ -845,8 +845,9 @@ describe('WATERLOGS (water tracking: recipient-scoped reads, attributed writes)'
 // updatedAt are pinned to the server time.
 //
 // LEGACY (owner requirement 2026-11-16): appointments created before orgId /
-// createdByUid existed must stay readable AND editable, and must never be
-// silently rewritten. Those cases are pinned in the last block.
+// createdByUid existed must stay readable, must never be silently rewritten,
+// and — because they record no author — may only be EDITED or DELETED by an
+// owner/admin of the recipient's org. Those cases are pinned in the last block.
 // ---------------------------------------------------------------------------
 describe('APPOINTMENTS (recipient-scoped reads, attributed writes, future dates allowed)', () => {
   const CG2    = 'uid_appt_cg2';    // second family caregiver in org_fam
@@ -906,13 +907,18 @@ describe('APPOINTMENTS (recipient-scoped reads, attributed writes, future dates 
         await set('appointments/' + id, seeded(F1ref));
       }
       // LEGACY fixtures — no orgId, no createdByUid anywhere
-      await set('appointments/appt_legacy_read',      legacy());
-      await set('appointments/appt_legacy_edit',      legacy());
-      await set('appointments/appt_legacy_backfill',  legacy());
-      await set('appointments/appt_legacy_badorg',    legacy());
-      await set('appointments/appt_legacy_badauthor', legacy());
-      await set('appointments/appt_legacy_del_cg',    legacy());
-      await set('appointments/appt_legacy_del_owner', legacy());
+      await set('appointments/appt_legacy_read',        legacy());
+      await set('appointments/appt_legacy_edit_owner',  legacy());
+      await set('appointments/appt_legacy_edit_admin',  legacy());
+      await set('appointments/appt_legacy_upd_cg',      legacy());
+      await set('appointments/appt_legacy_upd_cg2',     legacy());
+      await set('appointments/appt_legacy_backfill',    legacy());
+      await set('appointments/appt_legacy_badorg',      legacy());
+      await set('appointments/appt_legacy_badauthor',   legacy());
+      await set('appointments/appt_legacy_del_cg',      legacy());
+      await set('appointments/appt_legacy_del_cg2',     legacy());
+      await set('appointments/appt_legacy_del_owner',   legacy());
+      await set('appointments/appt_legacy_del_admin',   legacy());
     });
   });
 
@@ -1099,7 +1105,7 @@ describe('APPOINTMENTS (recipient-scoped reads, attributed writes, future dates 
   });
 
   // ---------------------------------------------------------------- legacy
-  describe('LEGACY records (no orgId / createdByUid) stay usable', () => {
+  describe('LEGACY records (no orgId / createdByUid): readable, owner/admin-only to write', () => {
     it('GET by an org member SUCCEEDS — reads never require the new fields', async () => {
       await assertSucceeds(dbFor(CAREGIVER).doc('appointments/appt_legacy_read').get());
     });
@@ -1122,11 +1128,31 @@ describe('APPOINTMENTS (recipient-scoped reads, attributed writes, future dates 
         throw new Error('legacy appointment missing from the calendar month query');
       }
     });
-    it('a caregiver may EDIT it, and the record is never silently rewritten', async () => {
-      await assertSucceeds(dbFor(CAREGIVER).doc('appointments/appt_legacy_edit').update({
+
+    // --- the 2026-11-16 tightening: NO recipient-write fallback on legacy docs
+    it('a NON-AUTHOR caregiver cannot EDIT a legacy record (DENIED)', async () => {
+      await assertFails(dbFor(CG2).doc('appointments/appt_legacy_upd_cg2').update({
+        appointmentTitle: 'Hijacked', updatedAt: serverTimestamp(),
+      }));
+    });
+    it('the recipient\'s own writer caregiver cannot EDIT a legacy record (DENIED)', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('appointments/appt_legacy_upd_cg').update({
         appointmentTitle: 'Old visit (rescheduled)', updatedAt: serverTimestamp(),
       }));
-      const snap = await assertSucceeds(dbFor(OWNER).doc('appointments/appt_legacy_edit').get());
+    });
+    it('a NON-AUTHOR caregiver cannot DELETE a legacy record (DENIED)', async () => {
+      await assertFails(dbFor(CG2).doc('appointments/appt_legacy_del_cg2').delete());
+    });
+    it('a caregiver cannot DELETE a legacy record (no recorded author) (DENIED)', async () => {
+      await assertFails(dbFor(CAREGIVER).doc('appointments/appt_legacy_del_cg').delete());
+    });
+
+    // --- owner/admin carry the legacy write path
+    it('the owner may EDIT a legacy record, and it is never silently rewritten', async () => {
+      await assertSucceeds(dbFor(OWNER).doc('appointments/appt_legacy_edit_owner').update({
+        appointmentTitle: 'Old visit (rescheduled)', updatedAt: serverTimestamp(),
+      }));
+      const snap = await assertSucceeds(dbFor(OWNER).doc('appointments/appt_legacy_edit_owner').get());
       const d = snap.data();
       if ('orgId' in d || 'createdByUid' in d) {
         throw new Error('legacy record was silently backfilled: ' + JSON.stringify(d));
@@ -1138,19 +1164,24 @@ describe('APPOINTMENTS (recipient-scoped reads, attributed writes, future dates 
         throw new Error('unrelated data was lost on edit: ' + JSON.stringify(d));
       }
     });
-    it('adding orgId with the recipient\'s REAL org SUCCEEDS (verified backfill)', async () => {
-      await assertSucceeds(dbFor(CAREGIVER).doc('appointments/appt_legacy_backfill').update({
+    it('an ADMIN may EDIT a legacy record', async () => {
+      await assertSucceeds(dbFor(ADMIN).doc('appointments/appt_legacy_edit_admin').update({
+        appointmentTitle: 'Old visit (admin edit)', updatedAt: serverTimestamp(),
+      }));
+    });
+    it('adding orgId with the recipient\'s REAL org SUCCEEDS (verified backfill, owner)', async () => {
+      await assertSucceeds(dbFor(OWNER).doc('appointments/appt_legacy_backfill').update({
         orgId: ORG_FAM, updatedAt: serverTimestamp(),
       }));
     });
     it('adding a WRONG orgId to a legacy record is DENIED', async () => {
-      await assertFails(dbFor(CAREGIVER).doc('appointments/appt_legacy_badorg').update({
+      await assertFails(dbFor(OWNER).doc('appointments/appt_legacy_badorg').update({
         orgId: ORG_OTHER, updatedAt: serverTimestamp(),
       }));
     });
     it('attributing a legacy record to another uid is DENIED', async () => {
-      await assertFails(dbFor(CAREGIVER).doc('appointments/appt_legacy_badauthor').update({
-        createdByUid: OWNER, updatedAt: serverTimestamp(),
+      await assertFails(dbFor(OWNER).doc('appointments/appt_legacy_badauthor').update({
+        createdByUid: CAREGIVER, updatedAt: serverTimestamp(),
       }));
     });
     it('a stranger cannot edit a legacy record', async () => {
@@ -1158,11 +1189,11 @@ describe('APPOINTMENTS (recipient-scoped reads, attributed writes, future dates 
         appointmentTitle: 'Hijacked', updatedAt: serverTimestamp(),
       }));
     });
-    it('a caregiver cannot DELETE a legacy record (no recorded author)', async () => {
-      await assertFails(dbFor(CAREGIVER).doc('appointments/appt_legacy_del_cg').delete());
-    });
     it('the owner CAN delete a legacy record', async () => {
       await assertSucceeds(dbFor(OWNER).doc('appointments/appt_legacy_del_owner').delete());
+    });
+    it('an ADMIN CAN delete a legacy record', async () => {
+      await assertSucceeds(dbFor(ADMIN).doc('appointments/appt_legacy_del_admin').delete());
     });
   });
 });

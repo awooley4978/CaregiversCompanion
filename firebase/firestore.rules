@@ -576,11 +576,11 @@ service cloud.firestore {
     //     absent (the record is left exactly as it was) or be filled in with a
     //     value these rules verify to be true — the recipient's real org, or the
     //     caller's own uid. A stored value is never overwritten.
-    //   * A legacy record has no recorded author, so its update is open to
-    //     whoever can already write that recipient's data (canWriteRecipientData)
-    //     rather than to a uid that was never recorded; its DELETE falls to
-    //     owner/admin, because there is no author to compare against and a
-    //     delete is not recoverable.
+    //   * A legacy record has no recorded author to compare against, so BOTH its
+    //     update and its delete require owner/admin of the recipient's org
+    //     (owner decision 2026-11-16). There is deliberately NO fallback to
+    //     plain recipient write access: a caregiver cannot edit or delete a
+    //     record that records no author.
     // ---------------------------------------------------------------------------
     match /appointments/{docId} {
       allow get:    if canAccessRecipientRef(get(resource.data.careRecipientRef).id);
@@ -618,8 +618,11 @@ service cloud.firestore {
         && (!('endDateTime' in request.resource.data)
              || request.resource.data.endDateTime >= request.resource.data.appointmentDateTime)
         && request.resource.data.updatedAt == request.time
-        && ( !('createdByUid' in resource.data)   // legacy: no recorded author
-             || resource.data.createdByUid == request.auth.uid
+        // author, or owner/admin of the recipient's org. A legacy record has no
+        // recorded author, so it is owner/admin only (2026-11-16) — no
+        // recipient-write fallback.
+        && ( (('createdByUid' in resource.data)
+              && resource.data.createdByUid == request.auth.uid)
              || memberHasRole(recipientOrgId(get(resource.data.careRecipientRef).id),
                               ['owner', 'admin']) );
 
