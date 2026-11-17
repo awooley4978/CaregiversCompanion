@@ -184,7 +184,12 @@ class _GDoctorVisitPrepWidgetState extends State<GDoctorVisitPrepWidget> {
     if (next == null) {
       return;
     }
-    final controller = TextEditingController();
+    // The dialog must not own a controller created out here: it would be
+    // disposed while the dialog is still animating away, and the closing field
+    // would rebuild against a disposed controller (caught by the part-3
+    // regression test as "A TextEditingController was used after being
+    // disposed"). `onChanged` keeps the typed text instead.
+    var typed = '';
     final question = await showDialog<String>(
       context: context,
       builder: (dialogContext) {
@@ -199,9 +204,9 @@ class _GDoctorVisitPrepWidgetState extends State<GDoctorVisitPrepWidget> {
                 ),
           ),
           content: TextField(
-            controller: controller,
             autofocus: true,
             maxLines: null,
+            onChanged: (value) => typed = value,
             decoration: InputDecoration(
               hintText: 'e.g. Ask about the fluid limit this week',
             ),
@@ -212,7 +217,7 @@ class _GDoctorVisitPrepWidgetState extends State<GDoctorVisitPrepWidget> {
               child: Text('Cancel'),
             ),
             TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(controller.text),
+              onPressed: () => Navigator.of(dialogContext).pop(typed),
               child: Text('Add'),
             ),
           ],
@@ -220,7 +225,6 @@ class _GDoctorVisitPrepWidgetState extends State<GDoctorVisitPrepWidget> {
       },
     );
     final text = (question ?? '').trim();
-    controller.dispose();
     if (text.isEmpty || !mounted) {
       return;
     }
