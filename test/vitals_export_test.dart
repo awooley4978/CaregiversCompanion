@@ -24,15 +24,15 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:new_project/app_state.dart';
-import 'package:new_project/backend/backend.dart';
-import 'package:new_project/backend/vitals/vitals_entry.dart';
-import 'package:new_project/backend/vitals/vitals_targets.dart';
-import 'package:new_project/flutter_flow/flutter_flow_icon_button.dart';
-import 'package:new_project/pages/e_vitals_tracker_log/e_vitals_tracker_log_widget.dart';
-import 'package:new_project/reports/care_report.dart';
-import 'package:new_project/reports/vitals_export.dart';
-import 'package:new_project/reports/vitals_export_pdf.dart';
+import 'package:caregivers_companion/app_state.dart';
+import 'package:caregivers_companion/backend/backend.dart';
+import 'package:caregivers_companion/backend/vitals/vitals_entry.dart';
+import 'package:caregivers_companion/backend/vitals/vitals_targets.dart';
+import 'package:caregivers_companion/flutter_flow/flutter_flow_icon_button.dart';
+import 'package:caregivers_companion/pages/e_vitals_tracker_log/e_vitals_tracker_log_widget.dart';
+import 'package:caregivers_companion/reports/care_report.dart';
+import 'package:caregivers_companion/reports/vitals_export.dart';
+import 'package:caregivers_companion/reports/vitals_export_pdf.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'firebase_test_setup.dart';
