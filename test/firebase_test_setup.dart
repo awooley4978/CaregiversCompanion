@@ -663,6 +663,11 @@ class _MemoryQuery extends QueryPlatform {
         return !_equals(actual, value);
       case 'in':
         return value is List && value.any((v) => _equals(actual, v));
+      case '>':
+      case '>=':
+      case '<':
+      case '<=':
+        return _compareCondition(actual, value, op);
       default:
         throw UnsupportedError('where operator "$op" is not supported by the '
             'memory fake.');
@@ -674,6 +679,31 @@ class _MemoryQuery extends QueryPlatform {
       return a == b;
     }
     return a == b;
+  }
+
+  /// The ordering comparisons behind `>`, `>=`, `<` and `<=`. A document that
+  /// does not hold the field never matches, exactly as real Firestore behaves.
+  bool _compareCondition(dynamic actual, dynamic value, String op) {
+    if (actual == null || value == null) {
+      return false;
+    }
+    final left = _comparableValue(actual);
+    final right = _comparableValue(value);
+    if (left == null || right == null) {
+      return false;
+    }
+    final comparison = Comparable.compare(left, right);
+    switch (op) {
+      case '>':
+        return comparison > 0;
+      case '>=':
+        return comparison >= 0;
+      case '<':
+        return comparison < 0;
+      case '<=':
+        return comparison <= 0;
+    }
+    return false;
   }
 
   QuerySnapshotPlatform _runSync() {
