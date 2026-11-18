@@ -1,5 +1,6 @@
 import '/backend/backend.dart';
 import '/backend/org/org_service.dart';
+import '/backend/vitals/vitals_targets.dart';
 import '/components/button/button_widget.dart';
 import '/components/condition_chip/condition_chip_widget.dart';
 import '/components/module_toggle/module_toggle_widget.dart';
@@ -215,6 +216,23 @@ String? careProfileDateOfBirthError(String? value, {String? loadedValue}) {
   return 'Enter the date of birth as MM/DD/YYYY (for example 03/14/1948).';
 }
 
+/// One measurement's two target boxes (minimum and maximum) together with the
+/// measurement they belong to, so the section can be laid out from one list.
+class _VitalsTargetFields {
+  const _VitalsTargetFields({
+    required this.measurement,
+    required this.minModel,
+    required this.maxModel,
+  });
+
+  final VitalsTargetMeasurement measurement;
+  final TextFieldModel minModel;
+  final TextFieldModel maxModel;
+
+  String get minFieldId => '${measurement.key}.min';
+  String get maxFieldId => '${measurement.key}.max';
+}
+
 class BCareProfileSetupWidget extends StatefulWidget {
   const BCareProfileSetupWidget({
     super.key,
@@ -252,6 +270,12 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
   /// The Date of Birth validation message, shown under the field and blocking
   /// the save until the value is a real date (owner amendment 2026-11-16).
   String? _dateOfBirthError;
+
+  /// The Vitals Target Ranges validation message and the box it belongs to
+  /// (owner-approved 2026-11-18). A bad target blocks the save, exactly like a
+  /// bad date of birth; nothing is stored and the form keeps what was typed.
+  String? _targetsError;
+  String? _targetsErrorField;
 
   bool get _isEditing => widget.careRecipients != null;
   bool get _saveBlocked =>
@@ -325,6 +349,19 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
         }
         _applyAdvanceDirectivesStatus(_model.advanceDirectivesStatus);
 
+        // Optional vitals targets: a recipient with none gets blank boxes, and
+        // a stored value is shown exactly as it was entered (never defaulted).
+        final storedTargets = vitalsTargetsFromRecord(recipient.vitalsTargets);
+        for (final fields in _vitalsTargetFields) {
+          final range = storedTargets[fields.measurement.key];
+          _setText(fields.minModel,
+              range?.min == null ? '' : formatVitalsTargetNumber(range!.min!));
+          _setText(fields.maxModel,
+              range?.max == null ? '' : formatVitalsTargetNumber(range!.max!));
+        }
+        _targetsError = null;
+        _targetsErrorField = null;
+
         _model.moduleToggleModel1.switchModel.switchValue =
             recipient.trackVitals;
         _model.moduleToggleModel2.switchModel.switchValue =
@@ -388,6 +425,46 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
     }
   }
 
+  /// The seven measurements that can carry a target, each with its minimum and
+  /// maximum box (owner-approved 2026-11-18). Pain is deliberately absent.
+  List<_VitalsTargetFields> get _vitalsTargetFields => [
+        _VitalsTargetFields(
+          measurement: kVitalsTargetBloodPressureSystolic,
+          minModel: _model.textFieldTargetSystolicMinModel,
+          maxModel: _model.textFieldTargetSystolicMaxModel,
+        ),
+        _VitalsTargetFields(
+          measurement: kVitalsTargetBloodPressureDiastolic,
+          minModel: _model.textFieldTargetDiastolicMinModel,
+          maxModel: _model.textFieldTargetDiastolicMaxModel,
+        ),
+        _VitalsTargetFields(
+          measurement: kVitalsTargetHeartRate,
+          minModel: _model.textFieldTargetHeartRateMinModel,
+          maxModel: _model.textFieldTargetHeartRateMaxModel,
+        ),
+        _VitalsTargetFields(
+          measurement: kVitalsTargetBloodGlucose,
+          minModel: _model.textFieldTargetGlucoseMinModel,
+          maxModel: _model.textFieldTargetGlucoseMaxModel,
+        ),
+        _VitalsTargetFields(
+          measurement: kVitalsTargetOxygenSaturation,
+          minModel: _model.textFieldTargetOxygenMinModel,
+          maxModel: _model.textFieldTargetOxygenMaxModel,
+        ),
+        _VitalsTargetFields(
+          measurement: kVitalsTargetTemperature,
+          minModel: _model.textFieldTargetTemperatureMinModel,
+          maxModel: _model.textFieldTargetTemperatureMaxModel,
+        ),
+        _VitalsTargetFields(
+          measurement: kVitalsTargetWeight,
+          minModel: _model.textFieldTargetWeightMinModel,
+          maxModel: _model.textFieldTargetWeightMaxModel,
+        ),
+      ];
+
   @override
   void dispose() {
     _model.dispose();
@@ -406,6 +483,42 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
       return _model.loadedDateOfBirth ?? '';
     }
     return typed;
+  }
+
+  /// Reads every Vitals Target box.
+  ///
+  /// Returns the map to store — one entry per measurement that has at least
+  /// one side filled in, with blank sides omitted — or null when a box is
+  /// invalid, in which case the message and the offending box are left in
+  /// state and the caller must not write anything. An empty map means "no
+  /// targets at all", which is how previously stored targets are cleared: the
+  /// save merges, so the field has to be written to remove the old numbers.
+  Map<String, dynamic>? _collectVitalsTargets() {
+    final stored = <String, dynamic>{};
+    String? error;
+    String? errorField;
+    for (final fields in _vitalsTargetFields) {
+      final result = readVitalsTargetPair(
+        measurement: fields.measurement,
+        minText: fields.minModel.inputTextController?.text,
+        maxText: fields.maxModel.inputTextController?.text,
+      );
+      if (result.error != null) {
+        error ??= result.error;
+        errorField ??= result.errorSide == VitalsTargetSide.min
+            ? fields.minFieldId
+            : fields.maxFieldId;
+      }
+      final range = result.range;
+      if (range != null && range.hasAny) {
+        stored[fields.measurement.key] = range.toStore();
+      }
+    }
+    safeSetState(() {
+      _targetsError = error;
+      _targetsErrorField = errorField;
+    });
+    return error == null ? stored : null;
   }
 
   /// Saves the form: creates a new care recipient when the page was opened
@@ -433,6 +546,17 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
     if (dateOfBirthError != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(dateOfBirthError)),
+      );
+      return;
+    }
+
+    // The optional vitals target ranges are validated before anything is
+    // written too (owner-approved 2026-11-18): a box that is not a number, or
+    // a minimum above the maximum, blocks the save and stores nothing.
+    final vitalsTargets = _collectVitalsTargets();
+    if (vitalsTargets == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_targetsError ?? 'Check the target ranges.')),
       );
       return;
     }
@@ -473,6 +597,10 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
       // The update stamps UpdatedAt; a create keeps its previous payload
       // (CreatedAt is written by the create helper's caller path as before).
       updatedAt: _isEditing ? DateTime.now() : null,
+      // Optional per-recipient vitals targets (owner-approved 2026-11-18).
+      // Written even when empty, so clearing every box really removes the
+      // targets that were stored before.
+      vitalsTargets: vitalsTargets,
     );
 
     try {
@@ -600,6 +728,177 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
           ),
         ),
       );
+
+  /// The optional Vitals Target Ranges section (owner-approved 2026-11-18).
+  ///
+  /// One minimum and one maximum box per measurement, every one blank unless
+  /// the caregiver entered a number, and nothing pre-filled. The wording says
+  /// where the numbers come from and that they are not advice; nothing here
+  /// judges a reading.
+  Widget _vitalsTargetsSection(BuildContext context) => Column(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Vitals Target Ranges',
+            style: FlutterFlowTheme.of(context).titleMedium.override(
+                  font: GoogleFonts.dmSans(
+                    fontWeight: FontWeight.bold,
+                    fontStyle:
+                        FlutterFlowTheme.of(context).titleMedium.fontStyle,
+                  ),
+                  letterSpacing: 0.0,
+                  fontWeight: FontWeight.bold,
+                  fontStyle: FlutterFlowTheme.of(context).titleMedium.fontStyle,
+                  lineHeight: 1.45,
+                ),
+          ),
+          Container(
+            decoration: BoxDecoration(
+              color: FlutterFlowTheme.of(context).secondaryBackground,
+              borderRadius: BorderRadius.circular(28.0),
+              shape: BoxShape.rectangle,
+              border: Border.all(
+                color: FlutterFlowTheme.of(context).alternate,
+                width: 1.0,
+              ),
+            ),
+            child: Padding(
+              padding: EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Optional — enter only the target ranges your care '
+                    "recipient's clinician has specified. Leave a box blank "
+                    'when there is no target. Targets are stored as entered '
+                    'and are not medical advice.',
+                    style: FlutterFlowTheme.of(context).bodySmall.override(
+                          font: GoogleFonts.nunito(
+                            fontWeight: FlutterFlowTheme.of(context)
+                                .bodySmall
+                                .fontWeight,
+                            fontStyle: FlutterFlowTheme.of(context)
+                                .bodySmall
+                                .fontStyle,
+                          ),
+                          letterSpacing: 0.0,
+                          fontWeight:
+                              FlutterFlowTheme.of(context).bodySmall.fontWeight,
+                          fontStyle:
+                              FlutterFlowTheme.of(context).bodySmall.fontStyle,
+                          lineHeight: 1.5,
+                        ),
+                  ),
+                  for (final fields in _vitalsTargetFields)
+                    _vitalsTargetRow(context, fields),
+                  if (_targetsError != null)
+                    Text(
+                      _targetsError!,
+                      style: FlutterFlowTheme.of(context).bodySmall.override(
+                            font: GoogleFonts.nunito(
+                              fontWeight: FlutterFlowTheme.of(context)
+                                  .bodySmall
+                                  .fontWeight,
+                              fontStyle: FlutterFlowTheme.of(context)
+                                  .bodySmall
+                                  .fontStyle,
+                            ),
+                            color: FlutterFlowTheme.of(context).error,
+                            letterSpacing: 0.0,
+                            fontWeight: FlutterFlowTheme.of(context)
+                                .bodySmall
+                                .fontWeight,
+                            fontStyle: FlutterFlowTheme.of(context)
+                                .bodySmall
+                                .fontStyle,
+                            lineHeight: 1.5,
+                          ),
+                    ),
+                ].divide(SizedBox(height: 16.0)),
+              ),
+            ),
+          ),
+        ].divide(SizedBox(height: 16.0)),
+      );
+
+  /// One measurement's minimum and maximum boxes, side by side.
+  Widget _vitalsTargetRow(BuildContext context, _VitalsTargetFields fields) =>
+      Column(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            '${fields.measurement.label} (${fields.measurement.unit})',
+            style: FlutterFlowTheme.of(context).labelMedium.override(
+                  font: GoogleFonts.nunito(
+                    fontWeight:
+                        FlutterFlowTheme.of(context).labelMedium.fontWeight,
+                    fontStyle:
+                        FlutterFlowTheme.of(context).labelMedium.fontStyle,
+                  ),
+                  letterSpacing: 0.0,
+                  fontWeight:
+                      FlutterFlowTheme.of(context).labelMedium.fontWeight,
+                  fontStyle: FlutterFlowTheme.of(context).labelMedium.fontStyle,
+                  lineHeight: 1.4,
+                ),
+          ),
+          Row(
+            mainAxisSize: MainAxisSize.max,
+            mainAxisAlignment: MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                flex: 1,
+                child: _vitalsTargetBox(
+                    context, fields, fields.minModel, VitalsTargetSide.min),
+              ),
+              SizedBox(width: 12.0),
+              Expanded(
+                flex: 1,
+                child: _vitalsTargetBox(
+                    context, fields, fields.maxModel, VitalsTargetSide.max),
+              ),
+            ],
+          ),
+        ].divide(SizedBox(height: 8.0)),
+      );
+
+  /// One target box. Its key is stable so the box can be found in a test.
+  Widget _vitalsTargetBox(
+    BuildContext context,
+    _VitalsTargetFields fields,
+    TextFieldModel model,
+    VitalsTargetSide side,
+  ) {
+    final isMin = side == VitalsTargetSide.min;
+    return wrapWithModel(
+      model: model,
+      updateCallback: () => safeSetState(() {}),
+      child: TextFieldWidget(
+        key: ValueKey(
+            'vitals_target_${fields.measurement.key}_${isMin ? 'min' : 'max'}'),
+        label: isMin ? 'Minimum' : 'Maximum',
+        labelPresent: true,
+        helper: '',
+        helperPresent: false,
+        leadingIconPresent: false,
+        trailingIconPresent: false,
+        hint: 'Optional',
+        value: '',
+        onChange: '',
+        onSubmit: '',
+        variant: 'outlined',
+        error: _targetsErrorField ==
+            (isMin ? fields.minFieldId : fields.maxFieldId),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1580,6 +1879,9 @@ class _BCareProfileSetupWidgetState extends State<BCareProfileSetupWidget> {
                                 ),
                               ].divide(SizedBox(height: 16.0)),
                             ),
+                            // Optional vitals target ranges
+                            // (owner-approved 2026-11-18).
+                            _vitalsTargetsSection(context),
                             InkWell(
                               splashColor: Colors.transparent,
                               focusColor: Colors.transparent,
