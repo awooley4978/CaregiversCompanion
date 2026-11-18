@@ -161,7 +161,7 @@ void main() {
     }
 
     Future<void> pumpEditor(WidgetTester tester, DocumentReference? ref) async {
-      tester.view.physicalSize = const Size(1080.0, 2600.0);
+      tester.view.physicalSize = const Size(1080.0, 4000.0);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
