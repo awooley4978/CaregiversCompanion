@@ -279,6 +279,7 @@ class VitalsExportData {
     required this.targets,
     this.undatedCount = 0,
     this.totalInPeriod,
+    this.capped = false,
   });
 
   final String recipientName;
@@ -299,6 +300,12 @@ class VitalsExportData {
   /// reached; null otherwise.
   final int? totalInPeriod;
 
+  /// True when the read itself hit the safety cap, so the report is short of
+  /// the period's readings whatever the count query managed to return. The
+  /// notice is printed from this, never from the count alone: a capped report
+  /// is always stated, even when the total is unknown.
+  final bool capped;
+
   int get readingCount =>
       days.fold(0, (sum, day) => sum + day.readings.length);
 
@@ -309,7 +316,7 @@ class VitalsExportData {
   /// True when the cap cut the report short, so the "showing N of M" line
   /// prints.
   bool get isTruncated =>
-      totalInPeriod != null && totalInPeriod! > readingCount;
+      capped || (totalInPeriod != null && totalInPeriod! > readingCount);
 
   /// The measurements that actually have a target, in display order — the
   /// report lists them so a dash is never a mystery.
@@ -347,6 +354,7 @@ VitalsExportData assembleVitalsExport({
   required Map<String, String> authorNames,
   Map<String, VitalsTargetRange> targets = const <String, VitalsTargetRange>{},
   int? totalInPeriod,
+  bool capped = false,
 }) {
   var undated = 0;
   final inRange = <VitalLogsRecord>[];
@@ -415,6 +423,7 @@ VitalsExportData assembleVitalsExport({
     targets: targets,
     undatedCount: undated,
     totalInPeriod: totalInPeriod,
+    capped: capped,
   );
 }
 
@@ -433,7 +442,8 @@ String vitalsExportTruncatedNotice(VitalsExportData data) {
   final shown = data.readingCount;
   final total = data.totalInPeriod;
   if (total == null) {
-    return 'Showing the first $shown readings. There are more readings in this '
+    final label = shown == 1 ? 'reading' : 'readings';
+    return 'Showing the first $shown $label. There are more readings in this '
         'period than one report can show.';
   }
   return 'Showing the first $shown of $total readings in this period.';
@@ -548,5 +558,6 @@ Future<VitalsExportData> loadVitalsExportData({
       recipient.hasVitalsTargets() ? recipient.vitalsTargets : null,
     ),
     totalInPeriod: totalInPeriod,
+    capped: truncated,
   );
 }

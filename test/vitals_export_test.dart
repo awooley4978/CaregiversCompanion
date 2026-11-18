@@ -33,6 +33,7 @@ import 'package:caregivers_companion/pages/e_vitals_tracker_log/e_vitals_tracker
 import 'package:caregivers_companion/reports/care_report.dart';
 import 'package:caregivers_companion/reports/vitals_export.dart';
 import 'package:caregivers_companion/reports/vitals_export_pdf.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'firebase_test_setup.dart';
@@ -318,12 +319,14 @@ void main() {
     test('blood pressure needs both sides and names the side that disagreed',
         () async {
       await seedRecipient();
-      await seedLog('systolic', at: DateTime(2026, 11, 16, 7), systolic: 150,
+      await seedLog('systolic', at: DateTime(2026, 11, 14, 7), systolic: 150,
           diastolic: 80);
-      await seedLog('diastolic', at: DateTime(2026, 11, 17, 7), systolic: 130,
+      await seedLog('diastolic', at: DateTime(2026, 11, 15, 7), systolic: 130,
           diastolic: 95);
-      await seedLog('both', at: DateTime(2026, 11, 18, 7), systolic: 130,
+      await seedLog('bothWithin', at: DateTime(2026, 11, 16, 7), systolic: 130,
           diastolic: 80);
+      await seedLog('bothAbove', at: DateTime(2026, 11, 17, 7), systolic: 160,
+          diastolic: 100);
 
       final data = await exportOf(
         targets: vitalsTargetsFromRecord({
@@ -332,18 +335,27 @@ void main() {
         }),
       );
 
+      // The two sides disagree, so each side is named with its own approved
+      // word — "Above target (systolic) / Within target (diastolic)".
       expect(
           data.days[0].readings.single
               .comparisonFor(VitalMeasurement.bloodPressure),
-          'Above target (systolic)');
+          '$vitalsExportAboveTarget (systolic) / '
+          '$vitalsExportWithinTarget (diastolic)');
       expect(
           data.days[1].readings.single
               .comparisonFor(VitalMeasurement.bloodPressure),
-          'Above target (diastolic)');
+          '$vitalsExportWithinTarget (systolic) / '
+          '$vitalsExportAboveTarget (diastolic)');
+      // The two sides agree, so the one approved phrase stands alone.
       expect(
           data.days[2].readings.single
               .comparisonFor(VitalMeasurement.bloodPressure),
           vitalsExportWithinTarget);
+      expect(
+          data.days[3].readings.single
+              .comparisonFor(VitalMeasurement.bloodPressure),
+          vitalsExportAboveTarget);
     });
 
     test('pain has no target and a targetless measurement gets a dash',
@@ -513,11 +525,22 @@ void main() {
       VitalsExportPdfAction? sharePdf,
       VitalsExportPdfAction? printPdf,
     }) async {
-      await tester.pumpWidget(MaterialApp(
-        home: EVitalsTrackerLogWidget(
-          now: now,
-          sharePdf: sharePdf,
-          printPdf: printPdf,
+      // The same scaffolding the range-sheet tests use: tall enough that the
+      // sheet's presets and its Generate PDF button are both on screen, and the
+      // provider the sheet reads FFAppState through.
+      tester.view.physicalSize = const Size(1080.0, 2400.0);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(ChangeNotifierProvider<FFAppState>.value(
+        value: FFAppState(),
+        child: MaterialApp(
+          home: EVitalsTrackerLogWidget(
+            now: now,
+            sharePdf: sharePdf,
+            printPdf: printPdf,
+          ),
         ),
       ));
       await pumpFrames(tester);
