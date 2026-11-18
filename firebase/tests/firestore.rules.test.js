@@ -1391,3 +1391,196 @@ describe('ensureOrgMembership retry — org-present/member-missing half state', 
     }));
   });
 });
+
+// ---------------------------------------------------------------------------
+// APP QUERY SHAPES — the EXACT queries the shipped pages run against the three
+// get()-based LIST rules (vitalLogs / waterLogs / appointments).
+//
+// Those three collections allow `list` with the full canAccessRecipientRef gate,
+// which reads the document via get(resource.data.careRecipientRef). A LIST rule
+// may only read a field the QUERY ITSELF constrains, so the pages' queries all
+// filter careRecipientRef and none of them filter orgId. The emulator probe of
+// 2026-11-18 confirmed that a get()-based LIST rule PASSES for exactly that
+// shape (a query that constrains careRecipientRef) and fails with
+// "Property careRecipientRef is undefined on object" only when the query leaves
+// it unconstrained. These cases pin the page-level shapes, including the
+// orderBy/limit each page adds, so a future rules edit cannot quietly break a
+// screen that currently works.
+//
+// Page sources:
+//   lib/pages/e_vitals_tracker_log  -> careRecipientRef + orderBy logDateTime desc + limit 50
+//   lib/components/daily_water_card -> careRecipientRef + orderBy intakeAt desc + limit
+//   lib/calendar_page               -> careRecipientRef + orderBy appointmentDateTime asc
+//   lib/reports/vitals_export       -> careRecipientRef + logDateTime range + orderBy logDateTime asc + limit
+// ---------------------------------------------------------------------------
+describe('APP QUERY SHAPES (exact where+orderBy+limit queries from the pages)', () => {
+  const REC_QV = 'rec_qv'; // dedicated vitals recipient (isolation from other blocks)
+  const REC_QW = 'rec_qw'; // dedicated water recipient
+  const REC_QA = 'rec_qa'; // dedicated appointments recipient
+  const VITALS_PAGE_LIMIT = 50;
+  const WATER_CARD_LIMIT = 200;
+
+  const minutesAgo = (m) => new Date(Date.now() - m * 60 * 1000);
+
+  let QVref, QWref, QAvref;
+
+  const vital = (ref, minutes, extra) => ({
+    careRecipientRef: ref, orgId: ORG_FAM, logDateTime: minutesAgo(minutes),
+    loggedByUid: CAREGIVER, systolic: 120, diastolic: 80, heartRate: 70, ...extra,
+  });
+  const intake = (ref, minutes) => ({
+    careRecipientRef: ref, orgId: ORG_FAM, intakeAt: minutesAgo(minutes),
+    loggedByUid: CAREGIVER, amount: 8, unit: 'fl_oz', amountFlOz: 8,
+  });
+  const appt = (ref, minutes, extra) => ({
+    careRecipientRef: ref, orgId: ORG_FAM, appointmentTitle: 'Visit',
+    appointmentDateTime: minutesAgo(minutes), createdByUid: CAREGIVER,
+    createdAt: new Date(), updatedAt: new Date(), ...extra,
+  });
+
+  before(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      const set = (p, d) => db.doc(p).set(d);
+      QVref = db.doc('careRecipients/' + REC_QV);
+      QWref = db.doc('careRecipients/' + REC_QW);
+      QAvref = db.doc('careRecipients/' + REC_QA);
+      await set('careRecipients/' + REC_QV, { orgId: ORG_FAM });
+      await set('careRecipients/' + REC_QW, { orgId: ORG_FAM });
+      await set('careRecipients/' + REC_QA, { orgId: ORG_FAM });
+      // the vitals recipient is also shared with the grantee org (share path)
+      await set(`recipientShares/${REC_QV}/grants/${ORG_GRNT}`, { accessLevel: 'caregiver' });
+      // three readings, oldest -> newest: qv_old (60m), qv_mid (30m), qv_new (5m)
+      await set('vitalLogs/qv_old', vital(QVref, 60));
+      await set('vitalLogs/qv_mid', vital(QVref, 30));
+      await set('vitalLogs/qv_new', vital(QVref, 5));
+      // three intakes: qw_old (60m), qw_mid (30m), qw_new (5m)
+      await set('waterLogs/qw_old', intake(QWref, 60));
+      await set('waterLogs/qw_mid', intake(QWref, 30));
+      await set('waterLogs/qw_new', intake(QWref, 5));
+      // two past visits + one FUTURE visit (the calendar must show it)
+      await set('appointments/qa_old', appt(QAvref, 60 * 24));
+      await set('appointments/qa_new', appt(QAvref, 60));
+      await set('appointments/qa_future', appt(QAvref, -60 * 24 * 7));
+    });
+  });
+
+  describe('vitals log page — careRecipientRef + orderBy logDateTime desc + limit 50', () => {
+    it('family caregiver: the page query is ALLOWED and returns newest first', async () => {
+      const snap = await dbFor(CAREGIVER)
+        .collection('vitalLogs')
+        .where('careRecipientRef', '==', QVref)
+        .orderBy('logDateTime', 'desc')
+        .limit(VITALS_PAGE_LIMIT)
+        .get();
+      const ids = snap.docs.map((d) => d.id);
+      if (ids.join(',') !== 'qv_new,qv_mid,qv_old') {
+        throw new Error('vitals page query did not return the 3 readings newest-first: ' + ids.join(','));
+      }
+    });
+
+    it('the same shape with a smaller limit returns the newest N only', async () => {
+      const snap = await dbFor(CAREGIVER)
+        .collection('vitalLogs')
+        .where('careRecipientRef', '==', QVref)
+        .orderBy('logDateTime', 'desc')
+        .limit(2)
+        .get();
+      const ids = snap.docs.map((d) => d.id);
+      if (ids.join(',') !== 'qv_new,qv_mid') {
+        throw new Error('limit did not take the newest 2: ' + ids.join(','));
+      }
+    });
+
+    it('grantee (share, no org filter) can run the page query', async () => {
+      await assertSucceeds(dbFor(GRANTEE)
+        .collection('vitalLogs')
+        .where('careRecipientRef', '==', QVref)
+        .orderBy('logDateTime', 'desc')
+        .limit(VITALS_PAGE_LIMIT)
+        .get());
+    });
+
+    it('stranger (other org): the page query is DENIED', async () => {
+      await assertFails(dbFor(STRANGER)
+        .collection('vitalLogs')
+        .where('careRecipientRef', '==', QVref)
+        .orderBy('logDateTime', 'desc')
+        .limit(VITALS_PAGE_LIMIT)
+        .get());
+    });
+
+    it('vitals export shape (logDateTime range + orderBy asc + limit) is ALLOWED', async () => {
+      const snap = await dbFor(OWNER)
+        .collection('vitalLogs')
+        .where('careRecipientRef', '==', QVref)
+        .where('logDateTime', '>=', minutesAgo(45))
+        .where('logDateTime', '<=', new Date())
+        .orderBy('logDateTime', 'asc')
+        .limit(2001) // kVitalsExportMaxRows + 1
+        .get();
+      const ids = snap.docs.map((d) => d.id);
+      if (ids.join(',') !== 'qv_mid,qv_new') {
+        throw new Error('bounded export query returned the wrong rows: ' + ids.join(','));
+      }
+    });
+  });
+
+  describe('daily water card — careRecipientRef + orderBy intakeAt desc + limit', () => {
+    it('family caregiver: the card query is ALLOWED and returns newest first', async () => {
+      const snap = await dbFor(CAREGIVER)
+        .collection('waterLogs')
+        .where('careRecipientRef', '==', QWref)
+        .orderBy('intakeAt', 'desc')
+        .limit(WATER_CARD_LIMIT)
+        .get();
+      const ids = snap.docs.map((d) => d.id);
+      if (ids.join(',') !== 'qw_new,qw_mid,qw_old') {
+        throw new Error('water card query did not return the 3 intakes newest-first: ' + ids.join(','));
+      }
+    });
+
+    it('the same shape with limit 1 returns the newest intake (Undo target)', async () => {
+      const snap = await dbFor(CAREGIVER)
+        .collection('waterLogs')
+        .where('careRecipientRef', '==', QWref)
+        .orderBy('intakeAt', 'desc')
+        .limit(1)
+        .get();
+      if (snap.docs.length !== 1 || snap.docs[0].id !== 'qw_new') {
+        throw new Error('expected the newest intake qw_new, got ' + snap.docs.map((d) => d.id).join(','));
+      }
+    });
+
+    it('stranger (other org): the card query is DENIED', async () => {
+      await assertFails(dbFor(STRANGER)
+        .collection('waterLogs')
+        .where('careRecipientRef', '==', QWref)
+        .orderBy('intakeAt', 'desc')
+        .limit(WATER_CARD_LIMIT)
+        .get());
+    });
+  });
+
+  describe('calendar page — careRecipientRef + orderBy appointmentDateTime asc', () => {
+    it('family caregiver: the calendar query is ALLOWED and returns ascending, future included', async () => {
+      const snap = await dbFor(CAREGIVER)
+        .collection('appointments')
+        .where('careRecipientRef', '==', QAvref)
+        .orderBy('appointmentDateTime', 'asc')
+        .get();
+      const ids = snap.docs.map((d) => d.id);
+      if (ids.join(',') !== 'qa_old,qa_new,qa_future') {
+        throw new Error('calendar query did not return the 3 visits ascending (future last): ' + ids.join(','));
+      }
+    });
+
+    it('stranger (other org): the calendar query is DENIED', async () => {
+      await assertFails(dbFor(STRANGER)
+        .collection('appointments')
+        .where('careRecipientRef', '==', QAvref)
+        .orderBy('appointmentDateTime', 'asc')
+        .get());
+    });
+  });
+});
