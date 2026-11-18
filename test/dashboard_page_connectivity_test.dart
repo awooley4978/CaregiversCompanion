@@ -6,8 +6,8 @@
 // harness: rendering it bare trips a pre-existing, unrelated carechecklist
 // orderBy TypeError.
 import 'package:flutter_test/flutter_test.dart';
-import 'package:new_project/app_state.dart';
-import 'package:new_project/pages/c_daily_dashboard/c_daily_dashboard_widget.dart';
+import 'package:caregivers_companion/app_state.dart';
+import 'package:caregivers_companion/pages/c_daily_dashboard/c_daily_dashboard_widget.dart';
 import 'firebase_test_setup.dart';
 
 void main() {

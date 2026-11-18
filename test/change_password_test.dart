@@ -10,7 +10,7 @@
 // generic handler that would send it somewhere wrong.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:new_project/pages/settings_account/settings_account_widget.dart';
+import 'package:caregivers_companion/pages/settings_account/settings_account_widget.dart';
 import 'firebase_test_setup.dart';
 
 /// Counts navigations, so "the row did nothing" can be asserted.

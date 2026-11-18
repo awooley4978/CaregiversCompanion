@@ -18,11 +18,11 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:new_project/backend/schema/care_recipients_record.dart';
-import 'package:new_project/components/condition_chip/condition_chip_model.dart';
-import 'package:new_project/components/condition_chip/condition_chip_widget.dart';
-import 'package:new_project/flutter_flow/flutter_flow_model.dart';
-import 'package:new_project/pages/b_care_profile_setup/b_care_profile_setup_widget.dart';
+import 'package:caregivers_companion/backend/schema/care_recipients_record.dart';
+import 'package:caregivers_companion/components/condition_chip/condition_chip_model.dart';
+import 'package:caregivers_companion/components/condition_chip/condition_chip_widget.dart';
+import 'package:caregivers_companion/flutter_flow/flutter_flow_model.dart';
+import 'package:caregivers_companion/pages/b_care_profile_setup/b_care_profile_setup_widget.dart';
 import 'firebase_test_setup.dart';
 
 /// A page chip model carrying nothing but its current selection.

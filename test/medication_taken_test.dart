@@ -13,8 +13,8 @@
 //       and the Flutter record reads `takenAt` as null.
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:new_project/backend/schema/medications_record.dart';
-import 'package:new_project/pages/d_medication_tracker/d_medication_tracker_widget.dart';
+import 'package:caregivers_companion/backend/schema/medications_record.dart';
+import 'package:caregivers_companion/pages/d_medication_tracker/d_medication_tracker_widget.dart';
 import 'firebase_test_setup.dart';
 
 void main() {

@@ -11,7 +11,7 @@
 //
 // Deterministic & offline: pure value assertions, no Firebase/network/DOM.
 import 'package:flutter_test/flutter_test.dart';
-import 'package:new_project/backend/firebase/auth_config.dart';
+import 'package:caregivers_companion/backend/firebase/auth_config.dart';
 
 void main() {
   group('authContinueUrl (email sign-in continue/return URL)', () {

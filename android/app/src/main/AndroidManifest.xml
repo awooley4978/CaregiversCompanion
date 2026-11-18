@@ -5,7 +5,7 @@
 
 
     <application
-        android:label="New Project"
+        android:label="Caregivers Companion"
         tools:replace="android:label"
         android:icon="@mipmap/ic_launcher"
         android:requestLegacyExternalStorage="true">

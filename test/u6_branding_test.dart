@@ -13,10 +13,10 @@
 // test/firebase_test_setup.dart.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:new_project/app_state.dart';
-import 'package:new_project/components/dashboard_notes_form/dashboard_notes_form_widget.dart';
-import 'package:new_project/components/note_card/note_card_widget.dart';
-import 'package:new_project/pages/settings_account/settings_account_widget.dart';
+import 'package:caregivers_companion/app_state.dart';
+import 'package:caregivers_companion/components/dashboard_notes_form/dashboard_notes_form_widget.dart';
+import 'package:caregivers_companion/components/note_card/note_card_widget.dart';
+import 'package:caregivers_companion/pages/settings_account/settings_account_widget.dart';
 import 'package:provider/provider.dart';
 import 'firebase_test_setup.dart';
 
