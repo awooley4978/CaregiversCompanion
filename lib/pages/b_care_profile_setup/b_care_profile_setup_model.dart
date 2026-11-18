@@ -102,6 +102,22 @@ class BCareProfileSetupModel extends FlutterFlowModel<BCareProfileSetupWidget> {
   late ConditionChipModel conditionChipAdvanceDirectivesModel3;
   // Model for TextField-AdvanceDirectivesNotes.
   late TextFieldModel textFieldAdvanceDirectivesNotesModel;
+  // Models for the optional Vitals Target Ranges (owner-approved 2026-11-18):
+  // one minimum and one maximum box per measurement, in display order.
+  late TextFieldModel textFieldTargetSystolicMinModel;
+  late TextFieldModel textFieldTargetSystolicMaxModel;
+  late TextFieldModel textFieldTargetDiastolicMinModel;
+  late TextFieldModel textFieldTargetDiastolicMaxModel;
+  late TextFieldModel textFieldTargetHeartRateMinModel;
+  late TextFieldModel textFieldTargetHeartRateMaxModel;
+  late TextFieldModel textFieldTargetGlucoseMinModel;
+  late TextFieldModel textFieldTargetGlucoseMaxModel;
+  late TextFieldModel textFieldTargetOxygenMinModel;
+  late TextFieldModel textFieldTargetOxygenMaxModel;
+  late TextFieldModel textFieldTargetTemperatureMinModel;
+  late TextFieldModel textFieldTargetTemperatureMaxModel;
+  late TextFieldModel textFieldTargetWeightMinModel;
+  late TextFieldModel textFieldTargetWeightMaxModel;
   // Model for Button.
   late ButtonModel buttonModel;
 
@@ -136,6 +152,34 @@ class BCareProfileSetupModel extends FlutterFlowModel<BCareProfileSetupWidget> {
         createModel(context, () => ConditionChipModel());
     textFieldAdvanceDirectivesNotesModel =
         createModel(context, () => TextFieldModel());
+    textFieldTargetSystolicMinModel =
+        createModel(context, () => TextFieldModel());
+    textFieldTargetSystolicMaxModel =
+        createModel(context, () => TextFieldModel());
+    textFieldTargetDiastolicMinModel =
+        createModel(context, () => TextFieldModel());
+    textFieldTargetDiastolicMaxModel =
+        createModel(context, () => TextFieldModel());
+    textFieldTargetHeartRateMinModel =
+        createModel(context, () => TextFieldModel());
+    textFieldTargetHeartRateMaxModel =
+        createModel(context, () => TextFieldModel());
+    textFieldTargetGlucoseMinModel =
+        createModel(context, () => TextFieldModel());
+    textFieldTargetGlucoseMaxModel =
+        createModel(context, () => TextFieldModel());
+    textFieldTargetOxygenMinModel =
+        createModel(context, () => TextFieldModel());
+    textFieldTargetOxygenMaxModel =
+        createModel(context, () => TextFieldModel());
+    textFieldTargetTemperatureMinModel =
+        createModel(context, () => TextFieldModel());
+    textFieldTargetTemperatureMaxModel =
+        createModel(context, () => TextFieldModel());
+    textFieldTargetWeightMinModel =
+        createModel(context, () => TextFieldModel());
+    textFieldTargetWeightMaxModel =
+        createModel(context, () => TextFieldModel());
     buttonModel = createModel(context, () => ButtonModel());
   }
 
@@ -166,6 +210,20 @@ class BCareProfileSetupModel extends FlutterFlowModel<BCareProfileSetupWidget> {
     conditionChipAdvanceDirectivesModel2.dispose();
     conditionChipAdvanceDirectivesModel3.dispose();
     textFieldAdvanceDirectivesNotesModel.dispose();
+    textFieldTargetSystolicMinModel.dispose();
+    textFieldTargetSystolicMaxModel.dispose();
+    textFieldTargetDiastolicMinModel.dispose();
+    textFieldTargetDiastolicMaxModel.dispose();
+    textFieldTargetHeartRateMinModel.dispose();
+    textFieldTargetHeartRateMaxModel.dispose();
+    textFieldTargetGlucoseMinModel.dispose();
+    textFieldTargetGlucoseMaxModel.dispose();
+    textFieldTargetOxygenMinModel.dispose();
+    textFieldTargetOxygenMaxModel.dispose();
+    textFieldTargetTemperatureMinModel.dispose();
+    textFieldTargetTemperatureMaxModel.dispose();
+    textFieldTargetWeightMinModel.dispose();
+    textFieldTargetWeightMaxModel.dispose();
     buttonModel.dispose();
   }
 }

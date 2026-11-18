@@ -151,6 +151,16 @@ class CareRecipientsRecord extends FirestoreRecord {
   String get advanceDirectivesNotes => _advanceDirectivesNotes ?? '';
   bool hasAdvanceDirectivesNotes() => _advanceDirectivesNotes != null;
 
+  // "VitalsTargets" field (owner-approved 2026-11-18, vitals-export §13 item
+  // 2b): the optional per-recipient vitals target ranges, keyed by measurement
+  // (see backend/vitals/vitals_targets.dart for the shape and the rules that
+  // guard it). Absent on every record written before this field existed — no
+  // migration; the getter falls back to an empty map so the read path never
+  // crashes, and blank means "no target".
+  Map<String, dynamic>? _vitalsTargets;
+  Map<String, dynamic> get vitalsTargets => _vitalsTargets ?? const {};
+  bool hasVitalsTargets() => _vitalsTargets != null;
+
   void _initializeFields() {
     _name = snapshotData['Name'] as String?;
     _conditions = getDataList(snapshotData['Conditions']);
@@ -179,6 +189,10 @@ class CareRecipientsRecord extends FirestoreRecord {
         snapshotData['AdvanceDirectivesStatus'] as String?;
     _advanceDirectivesNotes =
         snapshotData['AdvanceDirectivesNotes'] as String?;
+    final rawVitalsTargets = snapshotData['VitalsTargets'];
+    _vitalsTargets = rawVitalsTargets is Map
+        ? Map<String, dynamic>.from(rawVitalsTargets)
+        : null;
   }
 
   static CollectionReference get collection =>
@@ -239,6 +253,7 @@ Map<String, dynamic> createCareRecipientsRecordData({
   String? migrationStatus,
   String? advanceDirectivesStatus,
   String? advanceDirectivesNotes,
+  Map<String, dynamic>? vitalsTargets,
 }) {
   final firestoreData = mapToFirestore(
     <String, dynamic>{
@@ -265,6 +280,10 @@ Map<String, dynamic> createCareRecipientsRecordData({
       'migrationStatus': migrationStatus,
       'AdvanceDirectivesStatus': advanceDirectivesStatus,
       'AdvanceDirectivesNotes': advanceDirectivesNotes,
+      // Written whenever the caller supplies it (even as an empty map, which
+      // is how the editor CLEARS targets: the update merges, so the field has
+      // to be written to remove the previous numbers).
+      'VitalsTargets': vitalsTargets,
     }.withoutNulls,
   );
 
@@ -300,7 +319,9 @@ class CareRecipientsRecordDocumentEquality
         e1?.orgId == e2?.orgId &&
         e1?.migrationStatus == e2?.migrationStatus &&
         e1?.advanceDirectivesStatus == e2?.advanceDirectivesStatus &&
-        e1?.advanceDirectivesNotes == e2?.advanceDirectivesNotes;
+        e1?.advanceDirectivesNotes == e2?.advanceDirectivesNotes &&
+        const DeepCollectionEquality().equals(
+            e1?.vitalsTargets, e2?.vitalsTargets);
   }
 
   @override
@@ -327,7 +348,8 @@ class CareRecipientsRecordDocumentEquality
         e?.orgId,
         e?.migrationStatus,
         e?.advanceDirectivesStatus,
-        e?.advanceDirectivesNotes
+        e?.advanceDirectivesNotes,
+        const DeepCollectionEquality().hash(e?.vitalsTargets),
       ]);
 
   @override
