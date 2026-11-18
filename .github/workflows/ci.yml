@@ -30,6 +30,18 @@ jobs:
       - name: Build web
         run: flutter build web --release
 
+      # Publish the web build so the preview can be refreshed from CI instead of
+      # a stale hand-built copy: /home/team/shared/stage-app-build.sh downloads
+      # this artifact for a given commit and stages it into the preview's
+      # public/app. Short retention — only the newest runs matter.
+      - name: Upload web build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-build
+          path: build/web
+          retention-days: 7
+          if-no-files-found: error
+
   # Regression gate for the Firestore security ruleset (firebase/firestore.rules).
   # Loads the REAL rules file and asserts the Phase-4 deny-by-default matrix
   # against the Firestore emulator. Runs independently of the Flutter build gate.
