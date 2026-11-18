@@ -27,7 +27,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:google_sign_in_platform_interface/google_sign_in_platform_interface.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
-import 'package:new_project/backend/auth/auth_service.dart';
+import 'package:caregivers_companion/backend/auth/auth_service.dart';
 
 import 'firebase_test_setup.dart';
 

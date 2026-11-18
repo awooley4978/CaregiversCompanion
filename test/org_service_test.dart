@@ -14,8 +14,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:new_project/backend/auth/auth_service.dart';
-import 'package:new_project/backend/org/org_service.dart';
+import 'package:caregivers_companion/backend/auth/auth_service.dart';
+import 'package:caregivers_companion/backend/org/org_service.dart';
 
 import 'firebase_test_setup.dart';
 

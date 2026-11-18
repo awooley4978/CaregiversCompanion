@@ -27,12 +27,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:new_project/app_state.dart';
-import 'package:new_project/backend/backend.dart';
-import 'package:new_project/backend/org/org_service.dart';
-import 'package:new_project/components/dashboard_notes_form/dashboard_notes_form_widget.dart';
-import 'package:new_project/pages/c_daily_dashboard/c_daily_dashboard_widget.dart';
-import 'package:new_project/pages/d_medication_tracker/d_medication_tracker_widget.dart';
+import 'package:caregivers_companion/app_state.dart';
+import 'package:caregivers_companion/backend/backend.dart';
+import 'package:caregivers_companion/backend/org/org_service.dart';
+import 'package:caregivers_companion/components/dashboard_notes_form/dashboard_notes_form_widget.dart';
+import 'package:caregivers_companion/pages/c_daily_dashboard/c_daily_dashboard_widget.dart';
+import 'package:caregivers_companion/pages/d_medication_tracker/d_medication_tracker_widget.dart';
 import 'firebase_test_setup.dart';
 
 void main() {

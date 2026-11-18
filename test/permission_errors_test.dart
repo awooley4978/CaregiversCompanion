@@ -7,7 +7,7 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:new_project/backend/permissions/permission_errors.dart';
+import 'package:caregivers_companion/backend/permissions/permission_errors.dart';
 
 void main() {
   group('isPermissionDenied', () {

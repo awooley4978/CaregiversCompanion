@@ -17,12 +17,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
-import 'package:new_project/components/nav_menu_directory/nav_menu_directory_widget.dart';
-import 'package:new_project/pages/a_client_directory/a_client_directory_widget.dart';
-import 'package:new_project/pages/b_care_profile_setup/b_care_profile_setup_widget.dart';
-import 'package:new_project/pages/c_daily_dashboard/c_daily_dashboard_widget.dart';
-import 'package:new_project/pages/h_weekly_summary_report/h_weekly_summary_report_widget.dart';
-import 'package:new_project/pages/settings_account/settings_account_widget.dart';
+import 'package:caregivers_companion/components/nav_menu_directory/nav_menu_directory_widget.dart';
+import 'package:caregivers_companion/pages/a_client_directory/a_client_directory_widget.dart';
+import 'package:caregivers_companion/pages/b_care_profile_setup/b_care_profile_setup_widget.dart';
+import 'package:caregivers_companion/pages/c_daily_dashboard/c_daily_dashboard_widget.dart';
+import 'package:caregivers_companion/pages/h_weekly_summary_report/h_weekly_summary_report_widget.dart';
+import 'package:caregivers_companion/pages/settings_account/settings_account_widget.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

@@ -8,9 +8,9 @@
 // "show every recipient".
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:new_project/app_state.dart';
-import 'package:new_project/backend/schema/care_recipients_record.dart';
-import 'package:new_project/pages/a_client_directory/a_client_directory_widget.dart';
+import 'package:caregivers_companion/app_state.dart';
+import 'package:caregivers_companion/backend/schema/care_recipients_record.dart';
+import 'package:caregivers_companion/pages/a_client_directory/a_client_directory_widget.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'firebase_test_setup.dart';

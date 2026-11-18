@@ -20,10 +20,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:new_project/app_state.dart';
-import 'package:new_project/backend/backend.dart';
-import 'package:new_project/backend/water/water_intake.dart';
-import 'package:new_project/components/daily_water_card/daily_water_card_widget.dart';
+import 'package:caregivers_companion/app_state.dart';
+import 'package:caregivers_companion/backend/backend.dart';
+import 'package:caregivers_companion/backend/water/water_intake.dart';
+import 'package:caregivers_companion/components/daily_water_card/daily_water_card_widget.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'firebase_test_setup.dart';

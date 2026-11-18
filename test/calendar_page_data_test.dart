@@ -20,10 +20,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/intl.dart';
-import 'package:new_project/app_state.dart';
-import 'package:new_project/backend/appointments/appointment_display.dart';
-import 'package:new_project/backend/backend.dart';
-import 'package:new_project/calendar_page/calendar_page_widget.dart';
+import 'package:caregivers_companion/app_state.dart';
+import 'package:caregivers_companion/backend/appointments/appointment_display.dart';
+import 'package:caregivers_companion/backend/backend.dart';
+import 'package:caregivers_companion/calendar_page/calendar_page_widget.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'firebase_test_setup.dart';

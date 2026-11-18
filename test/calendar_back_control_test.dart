@@ -8,8 +8,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
-import 'package:new_project/app_state.dart';
-import 'package:new_project/calendar_page/calendar_page_widget.dart';
+import 'package:caregivers_companion/app_state.dart';
+import 'package:caregivers_companion/calendar_page/calendar_page_widget.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
