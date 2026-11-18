@@ -22,22 +22,41 @@ import '/backend/backend.dart';
 import '/backend/org/org_service.dart';
 import '/backend/vitals/vitals_entry.dart';
 import '/components/button/button_widget.dart';
+import '/components/doctor_report_range_sheet/doctor_report_range_sheet_widget.dart';
 import '/components/nav_menu_directory/nav_menu_directory_widget.dart';
 import '/components/text_field/text_field_widget.dart';
 import '/flutter_flow/flutter_flow_icon_button.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/flutter_flow_widgets.dart';
+import '/reports/care_report.dart';
+import '/reports/vitals_export.dart';
+import '/reports/vitals_export_pdf.dart';
+import 'dart:typed_data';
 import 'dart:ui';
 import 'package:firebase_auth/firebase_auth.dart' show FirebaseAuth;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 import 'e_vitals_tracker_log_model.dart';
 export 'e_vitals_tracker_log_model.dart';
 
+/// Hands a generated PDF to a destination. Injectable so the two export
+/// actions can be tested without a platform print/share sheet.
+typedef VitalsExportPdfAction = Future<void> Function(
+  Uint8List bytes,
+  String fileName,
+);
+
 class EVitalsTrackerLogWidget extends StatefulWidget {
-  const EVitalsTrackerLogWidget({super.key, this.careRecipients});
+  const EVitalsTrackerLogWidget({
+    super.key,
+    this.careRecipients,
+    this.now,
+    this.sharePdf,
+    this.printPdf,
+  });
 
   static String routeName = 'EVitalsTrackerLog';
   static String routePath = '/eVitalsTrackerLog';
@@ -45,6 +64,18 @@ class EVitalsTrackerLogWidget extends StatefulWidget {
   /// The care recipient to record for. When null, the app-wide selection
   /// (`FFAppState().selectedCareRecipient`) is used.
   final DocumentReference? careRecipients;
+
+  /// Injectable 'today', so the export's default range and the generated date
+  /// are deterministic in tests (the same approach the Calendar and Weekly
+  /// Summary pages take).
+  final DateTime? now;
+
+  /// The "Save or share PDF" destination (defaults to the platform share/save
+  /// sheet).
+  final VitalsExportPdfAction? sharePdf;
+
+  /// The "Print" destination (defaults to the platform print dialog).
+  final VitalsExportPdfAction? printPdf;
 
   @override
   State<EVitalsTrackerLogWidget> createState() =>
@@ -66,6 +97,10 @@ class _EVitalsTrackerLogWidgetState extends State<EVitalsTrackerLogWidget> {
   bool _statusIsError = false;
   bool _loading = false;
   bool _saving = false;
+
+  /// True while an export PDF is being built, so the icon cannot be tapped
+  /// twice and two files cannot be produced for one tap.
+  bool _exporting = false;
   bool _isOwnerOrAdmin = false;
   String? _uid;
 
@@ -394,6 +429,114 @@ class _EVitalsTrackerLogWidgetState extends State<EVitalsTrackerLogWidget> {
     }
   }
 
+  /// Whether there is anything to export: a recipient, at least one saved
+  /// reading, and no export already running. Nothing is written by the export,
+  /// in any branch.
+  bool get _canExport =>
+      _recipientRef != null && _logs.isNotEmpty && !_exporting;
+
+  /// The export icon: pick a period (the same preset sheet Doctor Prep and the
+  /// Weekly Summary use, defaulting to Last 30 days), choose save/share or
+  /// print, then build the printable vitals table for that period.
+  Future<void> _exportVitals() async {
+    final ref = _recipientRef;
+    if (ref == null) {
+      _setStatus('Select a care recipient before exporting vitals.',
+          isError: true);
+      return;
+    }
+    if (_logs.isEmpty) {
+      _setStatus('No readings to export.', isError: true);
+      return;
+    }
+
+    final picked = await showModalBottomSheet<CareReportRange>(
+      isScrollControlled: true,
+      backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
+      context: context,
+      builder: (sheetContext) {
+        return GestureDetector(
+          onTap: () {
+            FocusScope.of(sheetContext).unfocus();
+            FocusManager.instance.primaryFocus?.unfocus();
+          },
+          child: Padding(
+            padding: MediaQuery.viewInsetsOf(sheetContext),
+            child: DoctorReportRangeSheetWidget(
+              initialPreset: defaultCareReportPreset,
+              now: widget.now,
+            ),
+          ),
+        );
+      },
+    );
+    if (picked == null || !mounted) {
+      return;
+    }
+
+    // Both destinations the owner settled for the Weekly Summary: save/share,
+    // and the print dialog.
+    final share = await showModalBottomSheet<bool>(
+      isScrollControlled: true,
+      backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
+      context: context,
+      builder: (sheetContext) => _VitalsExportActionsSheet(range: picked),
+    );
+    if (share == null || !mounted) {
+      return;
+    }
+
+    setState(() => _exporting = true);
+    Uint8List? bytes;
+    String? fileName;
+    try {
+      final data = await loadVitalsExportData(
+        recipientRef: ref,
+        range: picked,
+        generatedAt: widget.now,
+      );
+      bytes = await buildVitalsExportPdf(data);
+      fileName = vitalsExportFileName(data);
+    } catch (_) {
+      if (mounted) {
+        _setStatus(
+          'The readings could not be loaded. Please check your connection and '
+          'try again.',
+          isError: true,
+        );
+        setState(() => _exporting = false);
+      }
+      return;
+    }
+
+    try {
+      if (share) {
+        await (widget.sharePdf ?? _shareExportPdf)(bytes!, fileName!);
+      } else {
+        await (widget.printPdf ?? _printExportPdf)(bytes!, fileName!);
+      }
+    } catch (_) {
+      if (mounted) {
+        _setStatus(
+          'The vitals export could not be opened on this device.',
+          isError: true,
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _exporting = false);
+      }
+    }
+  }
+
+  Future<void> _shareExportPdf(Uint8List bytes, String fileName) async {
+    await Printing.sharePdf(bytes: bytes, filename: fileName);
+  }
+
+  Future<void> _printExportPdf(Uint8List bytes, String fileName) async {
+    await Printing.layoutPdf(name: fileName, onLayout: (_) async => bytes);
+  }
+
   Future<bool?> _confirmDelete() => showDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
@@ -561,17 +704,40 @@ class _EVitalsTrackerLogWidgetState extends State<EVitalsTrackerLogWidget> {
                               child: Padding(
                                 padding: EdgeInsetsDirectional.fromSTEB(
                                     35.0, 0.0, 30.0, 0.0),
-                                child: FlutterFlowIconButton(
-                                  key: const ValueKey('vitals_history_button'),
-                                  borderRadius: 8.0,
-                                  buttonSize: 40.0,
-                                  fillColor: Colors.transparent,
-                                  icon: Icon(
-                                    Icons.history_rounded,
-                                    color: theme.primaryText,
-                                    size: 24.0,
-                                  ),
-                                  onPressed: _openHistory,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    FlutterFlowIconButton(
+                                      key: const ValueKey(
+                                          'vitals_export_button'),
+                                      borderRadius: 8.0,
+                                      buttonSize: 40.0,
+                                      fillColor: Colors.transparent,
+                                      disabledColor: Colors.transparent,
+                                      icon: Icon(
+                                        Icons.picture_as_pdf_outlined,
+                                        color: _canExport
+                                            ? theme.primaryText
+                                            : theme.secondaryText,
+                                        size: 24.0,
+                                      ),
+                                      onPressed:
+                                          _canExport ? _exportVitals : null,
+                                    ),
+                                    FlutterFlowIconButton(
+                                      key: const ValueKey(
+                                          'vitals_history_button'),
+                                      borderRadius: 8.0,
+                                      buttonSize: 40.0,
+                                      fillColor: Colors.transparent,
+                                      icon: Icon(
+                                        Icons.history_rounded,
+                                        color: theme.primaryText,
+                                        size: 24.0,
+                                      ),
+                                      onPressed: _openHistory,
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
@@ -1552,6 +1718,93 @@ class _VitalsHistorySheet extends StatelessWidget {
                 ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The two export destinations the owner approved (2026-11-18, item 11): one
+/// action saves/shares the PDF, the other opens the print dialog. The sheet
+/// pops with true for save/share and false for print, or null when dismissed.
+class _VitalsExportActionsSheet extends StatelessWidget {
+  const _VitalsExportActionsSheet({required this.range});
+
+  final CareReportRange range;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = FlutterFlowTheme.of(context);
+
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsetsDirectional.fromSTEB(24.0, 24.0, 24.0, 24.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Export vitals',
+              style: theme.titleMedium.override(
+                font: GoogleFonts.dmSans(
+                  fontWeight: FontWeight.bold,
+                  fontStyle: theme.titleMedium.fontStyle,
+                ),
+                color: theme.primaryText,
+                letterSpacing: 0.0,
+                fontWeight: FontWeight.bold,
+                fontStyle: theme.titleMedium.fontStyle,
+                lineHeight: 1.3,
+              ),
+            ),
+            Padding(
+              padding: EdgeInsetsDirectional.fromSTEB(0.0, 4.0, 0.0, 0.0),
+              child: Text(
+                '${range.label} · ${range.boundsLabel}',
+                style: theme.bodySmall.override(
+                  font: GoogleFonts.nunito(
+                    fontWeight: theme.bodySmall.fontWeight,
+                    fontStyle: theme.bodySmall.fontStyle,
+                  ),
+                  color: theme.secondaryText,
+                  letterSpacing: 0.0,
+                  fontWeight: theme.bodySmall.fontWeight,
+                  fontStyle: theme.bodySmall.fontStyle,
+                  lineHeight: 1.5,
+                ),
+              ),
+            ),
+            Padding(
+              padding: EdgeInsetsDirectional.fromSTEB(0.0, 16.0, 0.0, 0.0),
+              child: ButtonWidget(
+                icon: Icon(
+                  Icons.ios_share_rounded,
+                  color: theme.primaryText,
+                  size: 24.0,
+                ),
+                iconPresent: true,
+                iconEndPresent: false,
+                content: 'Save or share PDF',
+                onPressed: () => Navigator.of(context).pop(true),
+              ),
+            ),
+            Padding(
+              padding: EdgeInsetsDirectional.fromSTEB(0.0, 12.0, 0.0, 0.0),
+              child: ButtonWidget(
+                icon: Icon(
+                  Icons.print_rounded,
+                  color: theme.primaryText,
+                  size: 24.0,
+                ),
+                iconPresent: true,
+                iconEndPresent: false,
+                content: 'Print',
+                variant: 'secondary',
+                onPressed: () => Navigator.of(context).pop(false),
+              ),
+            ),
+          ],
         ),
       ),
     );
