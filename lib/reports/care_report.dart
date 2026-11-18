@@ -300,12 +300,12 @@ CareReportData assembleCareReport({
     ..sort((a, b) => _newestFirst(a.timeLogged, b.timeLogged));
 
   final reportNotes = notes
-      .where((record) => range.includes(_noteTimestamp(record)))
+      .where((record) => range.includes(careNoteTimestamp(record)))
       .map((record) => CareReportNote(
             text: record.noteText,
             author: record.createdBy.trim(),
             category: record.category.trim(),
-            timestamp: _noteTimestamp(record),
+            timestamp: careNoteTimestamp(record),
           ))
       .toList()
     ..sort((a, b) => _newestFirst(a.timestamp, b.timestamp));
@@ -314,8 +314,8 @@ CareReportData assembleCareReport({
       .map((record) => CareReportMedication(
             name: record.medicationName.trim(),
             dose: record.dose.trim(),
-            schedule: _medicationSchedule(record),
-            status: _medicationStatus(record),
+            schedule: careReportMedicationSchedule(record),
+            status: careReportMedicationStatus(record),
           ))
       .toList()
     ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
@@ -333,10 +333,10 @@ CareReportData assembleCareReport({
 
 /// A care note's own timestamp: when it was written (`noteDateTime`), falling
 /// back to the record's `createdAt`. Null when neither is stored.
-DateTime? _noteTimestamp(CareNotesRecord record) =>
+DateTime? careNoteTimestamp(CareNotesRecord record) =>
     record.noteDateTime ?? record.createdAt;
 
-String _medicationSchedule(MedicationsRecord record) {
+String careReportMedicationSchedule(MedicationsRecord record) {
   final directions = record.directions.trim();
   final timeOfDay = record.timeOfDay.trim();
   if (directions.isNotEmpty) {
@@ -345,7 +345,7 @@ String _medicationSchedule(MedicationsRecord record) {
   return timeOfDay;
 }
 
-String _medicationStatus(MedicationsRecord record) {
+String careReportMedicationStatus(MedicationsRecord record) {
   final status = record.status.trim();
   if (status.isNotEmpty) {
     return status;
