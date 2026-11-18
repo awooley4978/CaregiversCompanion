@@ -13,8 +13,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:new_project/components/add_medication/add_medication_widget.dart';
-import 'package:new_project/flutter_flow/flutter_flow_util.dart';
+import 'package:caregivers_companion/components/add_medication/add_medication_widget.dart';
+import 'package:caregivers_companion/flutter_flow/flutter_flow_util.dart';
 import 'package:provider/provider.dart';
 import 'firebase_test_setup.dart';
 

@@ -7,7 +7,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:new_project/pages/settings_account/settings_account_widget.dart';
+import 'package:caregivers_companion/pages/settings_account/settings_account_widget.dart';
 import 'firebase_test_setup.dart';
 
 void main() {

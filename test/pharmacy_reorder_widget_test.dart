@@ -10,8 +10,8 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:new_project/backend/pharmacy/pharmacy_service.dart';
-import 'package:new_project/components/refill_item/refill_item_widget.dart';
+import 'package:caregivers_companion/backend/pharmacy/pharmacy_service.dart';
+import 'package:caregivers_companion/components/refill_item/refill_item_widget.dart';
 import 'package:url_launcher_platform_interface/link.dart';
 import 'package:url_launcher_platform_interface/url_launcher_platform_interface.dart';
 import 'firebase_test_setup.dart';

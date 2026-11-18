@@ -19,9 +19,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:new_project/app_state.dart';
-import 'package:new_project/components/add_meal_widget.dart';
-import 'package:new_project/pages/c_daily_dashboard/c_daily_dashboard_widget.dart';
+import 'package:caregivers_companion/app_state.dart';
+import 'package:caregivers_companion/components/add_meal_widget.dart';
+import 'package:caregivers_companion/pages/c_daily_dashboard/c_daily_dashboard_widget.dart';
 import 'package:provider/provider.dart';
 import 'firebase_test_setup.dart';
 

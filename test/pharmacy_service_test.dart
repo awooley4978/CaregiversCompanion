@@ -8,7 +8,7 @@
 //   * an unset pharmacy reads back as null (the "prompt to choose" guard).
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:new_project/backend/pharmacy/pharmacy_service.dart';
+import 'package:caregivers_companion/backend/pharmacy/pharmacy_service.dart';
 import 'firebase_test_setup.dart';
 
 void main() {

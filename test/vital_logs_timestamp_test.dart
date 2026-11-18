@@ -9,7 +9,7 @@
 // DROP the whole vitalLogs document.
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:new_project/backend/schema/vital_logs_record.dart';
+import 'package:caregivers_companion/backend/schema/vital_logs_record.dart';
 
 import 'firebase_test_setup.dart';
 

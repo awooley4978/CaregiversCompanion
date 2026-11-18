@@ -18,11 +18,11 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:new_project/app_state.dart';
-import 'package:new_project/backend/auth/auth_service.dart';
-import 'package:new_project/backend/org/org_service.dart';
-import 'package:new_project/backend/schema/care_recipients_record.dart';
-import 'package:new_project/backend/schema/symptom_entries_record.dart';
+import 'package:caregivers_companion/app_state.dart';
+import 'package:caregivers_companion/backend/auth/auth_service.dart';
+import 'package:caregivers_companion/backend/org/org_service.dart';
+import 'package:caregivers_companion/backend/schema/care_recipients_record.dart';
+import 'package:caregivers_companion/backend/schema/symptom_entries_record.dart';
 
 import 'firebase_test_setup.dart';
 

@@ -17,11 +17,11 @@ import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
-import 'package:new_project/app_state.dart';
-import 'package:new_project/backend/auth/auth_service.dart';
-import 'package:new_project/flutter_flow/nav/nav.dart';
-import 'package:new_project/main.dart';
-import 'package:new_project/pages/group/household_widget.dart';
+import 'package:caregivers_companion/app_state.dart';
+import 'package:caregivers_companion/backend/auth/auth_service.dart';
+import 'package:caregivers_companion/flutter_flow/nav/nav.dart';
+import 'package:caregivers_companion/main.dart';
+import 'package:caregivers_companion/pages/group/household_widget.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 

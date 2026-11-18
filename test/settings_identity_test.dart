@@ -15,9 +15,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:new_project/app_state.dart' show FFAppState;
-import 'package:new_project/pages/settings_account/settings_account_widget.dart';
-import 'package:new_project/backend/auth/auth_service.dart' show loadUserProfile;
+import 'package:caregivers_companion/app_state.dart' show FFAppState;
+import 'package:caregivers_companion/pages/settings_account/settings_account_widget.dart';
+import 'package:caregivers_companion/backend/auth/auth_service.dart' show loadUserProfile;
 import 'firebase_test_setup.dart';
 
 void main() {

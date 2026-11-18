@@ -15,12 +15,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
-import 'package:new_project/app_state.dart';
-import 'package:new_project/backend/backend.dart';
-import 'package:new_project/components/doctor_report_range_sheet/doctor_report_range_sheet_widget.dart';
-import 'package:new_project/pages/g_doctor_visit_prep/g_doctor_visit_prep_widget.dart';
-import 'package:new_project/reports/care_report.dart';
-import 'package:new_project/reports/care_report_pdf.dart';
+import 'package:caregivers_companion/app_state.dart';
+import 'package:caregivers_companion/backend/backend.dart';
+import 'package:caregivers_companion/components/doctor_report_range_sheet/doctor_report_range_sheet_widget.dart';
+import 'package:caregivers_companion/pages/g_doctor_visit_prep/g_doctor_visit_prep_widget.dart';
+import 'package:caregivers_companion/reports/care_report.dart';
+import 'package:caregivers_companion/reports/care_report_pdf.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 

@@ -10,12 +10,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
-import 'package:new_project/app_state.dart';
-import 'package:new_project/backend/permissions/permission_errors.dart';
-import 'package:new_project/backend/permissions/permission_router.dart';
-import 'package:new_project/pages/a_client_directory/a_client_directory_widget.dart';
-import 'package:new_project/pages/assignment_ended/assignment_ended_widget.dart';
-import 'package:new_project/pages/group/household_widget.dart';
+import 'package:caregivers_companion/app_state.dart';
+import 'package:caregivers_companion/backend/permissions/permission_errors.dart';
+import 'package:caregivers_companion/backend/permissions/permission_router.dart';
+import 'package:caregivers_companion/pages/a_client_directory/a_client_directory_widget.dart';
+import 'package:caregivers_companion/pages/assignment_ended/assignment_ended_widget.dart';
+import 'package:caregivers_companion/pages/group/household_widget.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
