@@ -1391,3 +1391,140 @@ describe('ensureOrgMembership retry — org-present/member-missing half state', 
     }));
   });
 });
+
+// ---------------------------------------------------------------------------
+// careRecipients UPDATE — the VitalsTargets map (PR #63; owner-approved
+// 2026-11-18, vitals-export proposal §13 item 2b). The per-recipient target
+// ranges are ONE optional field on the existing careRecipients document, so
+// they ride on the EXISTING update rule — `request.resource.data.orgId ==
+// resource.data.orgId && canWriteRecipientData(docId)` — with no rules change.
+// These cases pin that: whoever can already edit a recipient can set, change
+// and clear the map; the rest of the document survives the merge update; a
+// non-member and an unauthenticated caller cannot; and orgId stays immutable
+// while targets are being written.
+// ---------------------------------------------------------------------------
+describe('careRecipients UPDATE — VitalsTargets (per-recipient target ranges)', () => {
+  const assert = require('assert/strict');
+  const ADMIN = 'uid_vt_admin'; // admin in org_fam
+
+  const REC_SET      = 'rec_vt_set';      // no targets yet
+  const REC_CHANGE   = 'rec_vt_change';   // already has targets
+  const REC_CLEAR    = 'rec_vt_clear';    // already has targets
+  const REC_ORG      = 'rec_vt_org';      // orgId immutability
+  const REC_STRANGER = 'rec_vt_stranger'; // non-member write attempt
+  const REC_UNAUTH   = 'rec_vt_unauth';   // unauthenticated write attempt
+
+  // The stored shape: independent min/max per measurement, sides omitted when
+  // the caregiver left the box blank (never written as 0).
+  const targets = (over) => ({
+    bloodPressureSystolic: { min: 90, max: 140 },
+    heartRate: { min: 60 },
+    temperature: { max: 99.5 },
+    ...over,
+  });
+
+  const path = (id) => 'careRecipients/' + id;
+
+  // Read the stored doc back as the org owner — used to prove a DENIED write
+  // changed nothing and that a permitted merge left the other fields alone.
+  const rawDoc = (id) => dbFor(OWNER).doc(path(id)).get().then((s) => s.data());
+
+  before(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      const set = (p, d) => db.doc(p).set(d);
+      await set('users/' + ADMIN, { activeGroupId: ORG_FAM });
+      await set(`organizations/${ORG_FAM}/members/${ADMIN}`,
+        { uid: ADMIN, role: 'admin', status: 'active' });
+      // A recipient shaped like a real Care Profile: unrelated fields present
+      // so a merge update can be shown to leave them untouched.
+      const base = {
+        Name: 'Margaret', orgId: ORG_FAM, TrackVitals: true,
+        AdvanceDirectivesStatus: 'on_file', DateOfBirth: '1941-04-02',
+      };
+      await set(path(REC_SET), base);
+      await set(path(REC_CHANGE), { ...base, VitalsTargets: targets() });
+      await set(path(REC_CLEAR), { ...base, VitalsTargets: targets() });
+      await set(path(REC_ORG), base);
+      await set(path(REC_STRANGER), base);
+      await set(path(REC_UNAUTH), base);
+    });
+  });
+
+  // ---------------------------------------------------------------- set/change
+  it('a family caregiver can SET VitalsTargets, and other fields survive', async () => {
+    await assertSucceeds(dbFor(CAREGIVER).doc(path(REC_SET)).update({
+      VitalsTargets: targets(),
+    }));
+    const d = await rawDoc(REC_SET);
+    assert.deepEqual(d.VitalsTargets, targets());
+    // The merge wrote only the target map.
+    assert.equal(d.Name, 'Margaret');
+    assert.equal(d.orgId, ORG_FAM);
+    assert.equal(d.TrackVitals, true);
+    assert.equal(d.AdvanceDirectivesStatus, 'on_file');
+    assert.equal(d.DateOfBirth, '1941-04-02');
+  });
+
+  it('a family caregiver can CHANGE existing targets, other fields survive', async () => {
+    await assertSucceeds(dbFor(CAREGIVER).doc(path(REC_CHANGE)).update({
+      VitalsTargets: targets({ heartRate: { min: 55, max: 100 }, weight: { max: 150 } }),
+    }));
+    const d = await rawDoc(REC_CHANGE);
+    assert.deepEqual(d.VitalsTargets,
+      targets({ heartRate: { min: 55, max: 100 }, weight: { max: 150 } }));
+    assert.equal(d.Name, 'Margaret');
+    assert.equal(d.orgId, ORG_FAM);
+  });
+
+  it('a family caregiver can CLEAR targets by writing an empty map', async () => {
+    await assertSucceeds(dbFor(CAREGIVER).doc(path(REC_CLEAR)).update({
+      VitalsTargets: {},
+    }));
+    const d = await rawDoc(REC_CLEAR);
+    assert.deepEqual(d.VitalsTargets, {});
+    assert.equal(d.Name, 'Margaret');
+  });
+
+  it('the owner and an admin can also set targets', async () => {
+    await assertSucceeds(dbFor(OWNER).doc(path(REC_ORG)).update({
+      VitalsTargets: targets({ bloodGlucose: { min: 70, max: 180 } }),
+    }));
+    await assertSucceeds(dbFor(ADMIN).doc(path(REC_ORG)).update({
+      VitalsTargets: targets({ bloodGlucose: { min: 70, max: 180 } }),
+    }));
+    const d = await rawDoc(REC_ORG);
+    assert.deepEqual(d.VitalsTargets, targets({ bloodGlucose: { min: 70, max: 180 } }));
+  });
+
+  // ---------------------------------------------------------------- denials
+  it('a NON-MEMBER cannot set targets (and nothing is written)', async () => {
+    await assertFails(dbFor(STRANGER).doc(path(REC_STRANGER)).update({
+      VitalsTargets: targets(),
+    }));
+    const d = await rawDoc(REC_STRANGER);
+    assert.equal(d.VitalsTargets, undefined);
+    assert.equal(d.Name, 'Margaret');
+  });
+
+  it('an UNAUTHENTICATED caller cannot set targets (and nothing is written)', async () => {
+    const anon = env.unauthenticatedContext().firestore();
+    await assertFails(anon.doc(path(REC_UNAUTH)).update({ VitalsTargets: targets() }));
+    const d = await rawDoc(REC_UNAUTH);
+    assert.equal(d.VitalsTargets, undefined);
+    assert.equal(d.orgId, ORG_FAM);
+  });
+
+  // ---------------------------------------------------------------- orgId
+  it('orgId stays IMMUTABLE — targets cannot be smuggled with an org transfer', async () => {
+    await assertFails(dbFor(CAREGIVER).doc(path(REC_ORG)).update({
+      VitalsTargets: targets({ weight: { max: 200 } }), orgId: ORG_OTHER,
+    }));
+    // …nor can orgId change on its own.
+    await assertFails(dbFor(CAREGIVER).doc(path(REC_ORG)).update({ orgId: ORG_OTHER }));
+    const d = await rawDoc(REC_ORG);
+    assert.equal(d.orgId, ORG_FAM);
+    // The denied writes left the previously-set targets exactly as they were.
+    assert.deepEqual(d.VitalsTargets, targets({ bloodGlucose: { min: 70, max: 180 } }));
+  });
+});
