@@ -81,13 +81,18 @@ async function seed(ctx) {
   await set('careNotes/note_prof', { careRecipientRef: PROFref,  text: 'y' });
   await set('mealEntries/meal1',   { patientRef: F1ref,    mealName: 'Soup', orgId: ORG_FAM });
   await set('mealEntries/meal_other', { patientRef: OTHERref, mealName: 'X', orgId: ORG_OTHER });
+  // LEGACY docs: the shape of the owner's existing live records — the recipient
+  // reference and nothing else. They carry no orgId and must still be listable.
+  await set('mealEntries/meal_legacy', { patientRef: F1ref, mealName: 'Eggs' });
   await set('symptomEntries/sym1', { patientRef: F1ref });
   // medications — ref-linked via careRecipientRef (enabled for the tracker).
-  // Each carries its owner org's orgId (written from the app's active group on
-  // create) so the LIST query-compatible read path can gate on it without a
-  // get() (see canListRecipientsInOrg in the rules).
+  // Reads are recipient-scoped through that reference (2026-11-19), so a doc's
+  // stored orgId is not needed for listing; med1/med_other still carry it (the
+  // create rule requires it) and med_legacy deliberately does not.
   await set('medications/med1',    { careRecipientRef: F1ref,    medicationName: 'Lisinopril', taken: true,  orgId: ORG_FAM });
   await set('medications/med_other',{ careRecipientRef: OTHERref, medicationName: 'X', taken: false, orgId: ORG_OTHER });
+  // LEGACY medication: the owner's existing record shape — no orgId field.
+  await set('medications/med_legacy', { careRecipientRef: F1ref, medicationName: 'Amlodipine', taken: false });
 }
 
 before(async () => {
@@ -172,12 +177,17 @@ describe('GRANTEE (recipientShares share to org_fam recipient)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// MEDICATIONS — newly enabled from the dead-collection deny. ref-linked via
-// careRecipientRef, gated by the same recipient-org / share / assignment rule
-// as careNotes. Owner/active member of the recipient's org may read + write;
-// a stranger (member of another org) and cross-org docs are denied.
+// MEDICATIONS — ref-linked via careRecipientRef. Reads are recipient-scoped for
+// BOTH get and list (2026-11-19): the LIST rule resolves each candidate
+// document's own careRecipientRef with get() and applies the full
+// canAccessRecipientRef gate (within-org kind-branched + grantee share +
+// caregiver/viewer assignment). That is legal because the app's query
+// constrains exactly the field the rule reads — verified in the emulator on
+// 2026-11-18. Consequence: a medication needs NO stored orgId to be listable,
+// so the owner's existing records are listed exactly as they are, while a
+// stranger stays denied.
 // ---------------------------------------------------------------------------
-describe('MEDICATIONS (ref-linked via careRecipientRef — newly enabled)', () => {
+describe('MEDICATIONS (recipient-scoped reads; legacy docs with no orgId)', () => {
   it('owner of recipient org can read a medications doc', async () => {
     await assertSucceeds(dbFor(OWNER).doc('medications/med1').get());
   });
@@ -192,7 +202,7 @@ describe('MEDICATIONS (ref-linked via careRecipientRef — newly enabled)', () =
       orgId: ORG_FAM,
     }));
   });
-  it('create WITHOUT orgId is DENIED (every doc must carry the LIST rule field)', async () => {
+  it('create WITHOUT orgId is DENIED (create rule unchanged)', async () => {
     await assertFails(dbFor(OWNER).doc('medications/med_noorg').set({
       careRecipientRef: F1ref, medicationName: 'NoOrg', taken: false,
     }));
@@ -216,143 +226,137 @@ describe('MEDICATIONS (ref-linked via careRecipientRef — newly enabled)', () =
   it('grantee (caregiver-level share) can read medications for the shared recipient', async () => {
     await assertSucceeds(dbFor(GRANTEE).doc('medications/med1').get());
   });
-  // The medication tracker pages the schedule with a LIVE LIST query
-  // (`queryMedicationsRecord`), NOT a single-doc GET. It filters on BOTH
-  // `orgId == <caller's active group>` AND `careRecipientRef == <selected
-  // recipient>` — the same shape as the careRecipients list query
-  // (`careRecipientsForActiveGroup`: `q.where('orgId', isEqualTo: activeGroupId)`).
-  // The orgId filter is REQUIRED, not cosmetic: Firestore only exposes a
-  // candidate document's field to a list rule when the QUERY constrains that
-  // field, so without the orgId filter `resource.data.orgId` evaluates as
-  // undefined in LIST evaluation and `canListRecipientsInOrg` denies the whole
-  // query — a saved medication would then never appear in the tracker despite
-  // the "Medication added." success. (A get()-based `read` rule fails here for
-  // the same reason once ≥1 matching doc exists.) These cases pin the tracker's
-  // real query verbatim.
-  it('owner tracker LIST (orgId + careRecipientRef) is ALLOWED', async () => {
-    const q = dbFor(OWNER)
+  // The tracker and the dose card page their schedule with a LIVE LIST query
+  // (`queryMedicationsRecord`), which filters on the selected recipient ONLY:
+  //   where('careRecipientRef', '==', <selected recipient>)
+  // That single filter is what makes the recipient-scoped LIST rule work AND
+  // what makes a LEGACY doc (no orgId) visible. These cases pin that query
+  // verbatim for every actor.
+  it('owner tracker LIST (careRecipientRef only) lists the LEGACY doc with no orgId', async () => {
+    const snap = await assertSucceeds(dbFor(OWNER)
       .collection('medications')
-      .where('orgId', '==', ORG_FAM)
-      .where('careRecipientRef', '==', F1ref);
-    await assertSucceeds(q.get());
-  });
-  it('stranger (other-org member) tracker LIST against the family org is DENIED', async () => {
-    const q = dbFor(STRANGER)
-      .collection('medications')
-      .where('orgId', '==', ORG_FAM)
-      .where('careRecipientRef', '==', F1ref);
-    await assertFails(q.get());
-  });
-  it('stranger tracker LIST in their OWN org returns no family med (no cross-org leak)', async () => {
-    const q = dbFor(STRANGER)
-      .collection('medications')
-      .where('orgId', '==', ORG_OTHER)
-      .where('careRecipientRef', '==', OTHERref);
-    const snap = await assertSucceeds(q.get());
+      .where('careRecipientRef', '==', F1ref)
+      .get());
     const ids = snap.docs.map((d) => d.id);
-    if (ids.includes('med1')) {
+    if (!ids.includes('med_legacy')) {
+      throw new Error('legacy medication (no orgId) missing from the owner LIST: ' + ids.join(','));
+    }
+    if (ids.includes('med_other')) {
       throw new Error('cross-org leak in medications LIST: ' + ids.join(','));
     }
   });
-  // Known, deliberate limitation inherited from the Phase-4 careRecipients
-  // get/list split: LIST is MEMBERSHIP-based (canListRecipientsInOrg on the
-  // doc's orgId), while single-doc GET additionally honours a grantee share.
-  // A grantee therefore still GETs a medication (above) but a tracker LIST over
-  // the sharing org's id is denied, and a grantee-own-org LIST returns nothing
-  // for the shared recipient (no leak). Same shape as careRecipients today.
-  it('grantee tracker LIST over the sharing org is DENIED (list path is membership-based)', async () => {
-    await assertFails(dbFor(GRANTEE)
+  it('family caregiver tracker LIST (careRecipientRef only) lists the LEGACY doc with no orgId', async () => {
+    const snap = await assertSucceeds(dbFor(CAREGIVER)
       .collection('medications')
-      .where('orgId', '==', ORG_FAM)
+      .where('careRecipientRef', '==', F1ref)
+      .get());
+    const ids = snap.docs.map((d) => d.id);
+    if (!ids.includes('med_legacy')) {
+      throw new Error('legacy medication (no orgId) missing from the caregiver LIST: ' + ids.join(','));
+    }
+  });
+  it('grantee tracker LIST (careRecipientRef only) lists the LEGACY doc with no orgId', async () => {
+    const snap = await assertSucceeds(dbFor(GRANTEE)
+      .collection('medications')
+      .where('careRecipientRef', '==', F1ref)
+      .get());
+    const ids = snap.docs.map((d) => d.id);
+    if (!ids.includes('med_legacy')) {
+      throw new Error('legacy medication (no orgId) missing from the grantee LIST: ' + ids.join(','));
+    }
+  });
+  it('stranger tracker LIST (careRecipientRef only) is DENIED', async () => {
+    await assertFails(dbFor(STRANGER)
+      .collection('medications')
       .where('careRecipientRef', '==', F1ref)
       .get());
   });
-  it('grantee tracker LIST scoped to their own org returns nothing (no leak, no error)', async () => {
-    const snap = await assertSucceeds(dbFor(GRANTEE)
+  it('stranger LIST of their own recipient returns no family medication', async () => {
+    const snap = await assertSucceeds(dbFor(STRANGER)
       .collection('medications')
-      .where('orgId', '==', ORG_GRNT)
-      .where('careRecipientRef', '==', F1ref)
+      .where('careRecipientRef', '==', OTHERref)
       .get());
-    if (snap.docs.length !== 0) {
-      throw new Error('grantee LIST leaked ' + snap.docs.length + ' docs');
+    const ids = snap.docs.map((d) => d.id);
+    if (ids.includes('med1') || ids.includes('med_legacy')) {
+      throw new Error('cross-org leak in medications LIST: ' + ids.join(','));
     }
+  });
+  // A bare collection LIST stays denied: the query must constrain the field the
+  // rule reads, so there is no org-wide medication read.
+  it('owner bare LIST without the recipient filter is DENIED', async () => {
+    await assertFails(dbFor(OWNER).collection('medications').get());
   });
 });
 
 // ---------------------------------------------------------------------------
-// MEALENTRIES (ref-linked via patientRef — read split 2026-09-23).
-// The Daily Dashboard's 'Meals and Hydration' card now lists the resolved
-// recipient's meals with a LIVE LIST query
-// (`queryMealEntriesRecord`: where orgId == active group AND patientRef ==
-// recipient) — the same shape as the medications tracker query, and for the same
-// reason: Firestore evaluates LIST rules WITHOUT loading candidate documents, so
-// the rule can only gate on a stored field the QUERY constrains (orgId via the
-// exists()-only canListRecipientsInOrg check). These cases pin that query
-// verbatim; a get()-based `read` rule denies it live, which would leave a
-// confirmed "Meal saved." invisible on the card.
+// MEALENTRIES (ref-linked via patientRef — recipient-scoped reads, 2026-11-19).
+// Same shape as medications: the Daily Dashboard's 'Meals and Hydration' card
+// lists the resolved recipient's meals with a LIVE LIST query
+// (`queryMealEntriesRecord`: where patientRef == recipient, and nothing else).
+// A meal therefore needs no stored orgId to be listable — the owner's existing
+// meal records are listed as-is — and a stranger is still denied.
 // ---------------------------------------------------------------------------
-describe('MEALENTRIES (ref-linked via patientRef — read split)', () => {
+describe('MEALENTRIES (recipient-scoped reads; legacy docs with no orgId)', () => {
   it('owner of recipient org can GET a meal doc (full gate kept)', async () => {
     await assertSucceeds(dbFor(OWNER).doc('mealEntries/meal1').get());
   });
-  it('owner dashboard LIST (orgId + patientRef) is ALLOWED', async () => {
-    const q = dbFor(OWNER)
-      .collection('mealEntries')
-      .where('orgId', '==', ORG_FAM)
-      .where('patientRef', '==', F1ref);
-    await assertSucceeds(q.get());
-  });
-  it('owner LIST sees only their own org\'s meals', async () => {
+  it('owner dashboard LIST (patientRef only) lists the LEGACY doc with no orgId', async () => {
     const snap = await assertSucceeds(dbFor(OWNER)
       .collection('mealEntries')
-      .where('orgId', '==', ORG_FAM)
       .where('patientRef', '==', F1ref)
       .get());
     const ids = snap.docs.map((d) => d.id);
+    if (!ids.includes('meal_legacy')) {
+      throw new Error('legacy meal (no orgId) missing from the owner LIST: ' + ids.join(','));
+    }
     if (ids.includes('meal_other')) {
       throw new Error('cross-org leak in mealEntries LIST: ' + ids.join(','));
     }
   });
-  it('stranger (other-org member) LIST against the family org is DENIED', async () => {
+  it('family caregiver dashboard LIST (patientRef only) lists the LEGACY doc with no orgId', async () => {
+    const snap = await assertSucceeds(dbFor(CAREGIVER)
+      .collection('mealEntries')
+      .where('patientRef', '==', F1ref)
+      .get());
+    const ids = snap.docs.map((d) => d.id);
+    if (!ids.includes('meal_legacy')) {
+      throw new Error('legacy meal (no orgId) missing from the caregiver LIST: ' + ids.join(','));
+    }
+  });
+  it('grantee dashboard LIST (patientRef only) lists the LEGACY doc with no orgId', async () => {
+    const snap = await assertSucceeds(dbFor(GRANTEE)
+      .collection('mealEntries')
+      .where('patientRef', '==', F1ref)
+      .get());
+    const ids = snap.docs.map((d) => d.id);
+    if (!ids.includes('meal_legacy')) {
+      throw new Error('legacy meal (no orgId) missing from the grantee LIST: ' + ids.join(','));
+    }
+  });
+  it('stranger (other-org member) dashboard LIST (patientRef only) is DENIED', async () => {
     await assertFails(dbFor(STRANGER)
       .collection('mealEntries')
-      .where('orgId', '==', ORG_FAM)
       .where('patientRef', '==', F1ref)
       .get());
   });
-  it('stranger LIST in their OWN org returns no family meal (no cross-org leak)', async () => {
+  it('stranger LIST of their own recipient returns no family meal', async () => {
     const snap = await assertSucceeds(dbFor(STRANGER)
       .collection('mealEntries')
-      .where('orgId', '==', ORG_OTHER)
       .where('patientRef', '==', OTHERref)
       .get());
     const ids = snap.docs.map((d) => d.id);
-    if (ids.includes('meal1')) {
+    if (ids.includes('meal1') || ids.includes('meal_legacy')) {
       throw new Error('cross-org leak in mealEntries LIST: ' + ids.join(','));
     }
   });
   it('stranger single GET of a family meal stays DENIED', async () => {
     await assertFails(dbFor(STRANGER).doc('mealEntries/meal1').get());
   });
-  it('family caregiver LIST (orgId + patientRef) is ALLOWED', async () => {
-    await assertSucceeds(dbFor(CAREGIVER)
-      .collection('mealEntries')
-      .where('orgId', '==', ORG_FAM)
-      .where('patientRef', '==', F1ref)
-      .get());
-  });
-  // Deliberate limitation inherited from the careRecipients/medications
-  // get-vs-list split: LIST is MEMBERSHIP-based, so a grantee still GETs a meal
-  // through their share but cannot LIST over the sharing org.
-  it('grantee LIST over the sharing org is DENIED (list path is membership-based)', async () => {
-    await assertFails(dbFor(GRANTEE)
-      .collection('mealEntries')
-      .where('orgId', '==', ORG_FAM)
-      .where('patientRef', '==', F1ref)
-      .get());
-  });
   it('grantee single GET of the shared meal still SUCCEEDS (share path intact)', async () => {
     await assertSucceeds(dbFor(GRANTEE).doc('mealEntries/meal1').get());
+  });
+  it('owner bare LIST without the recipient filter is DENIED', async () => {
+    await assertFails(dbFor(OWNER).collection('mealEntries').get());
   });
 });
 
@@ -1208,9 +1212,10 @@ describe('APPOINTMENTS (recipient-scoped reads, attributed writes, future dates 
 // ---------------------------------------------------------------------------
 describe('Real app write/delete paths (owner) + stranger denial', () => {
   it('mealEntries create (Add Meal sheet) ALLOWED for owner, DENIED for stranger', async () => {
-    // The doc must carry the caller's orgId: the mealEntries LIST rule (read
-    // split, 2026-09-23) gates on the STORED orgId, so a doc without one is
-    // rejected at create rather than poisoning the dashboard's meal query.
+    // The doc must still carry the caller's orgId: the create rule is unchanged
+    // (2026-11-19). The LIST rule no longer reads it — a doc WITHOUT orgId is
+    // listable if it exists (see the legacy cases above); this only pins the
+    // create contract the Add Meal form writes.
     await assertSucceeds(dbFor(OWNER).doc('mealEntries/meal_new').set({
       patientRef: F1ref, mealName: 'Soup', orgId: ORG_FAM,
     }));

@@ -58,8 +58,8 @@ void main() {
       ...mapToFirestore({
         'createdAt': FieldValue.serverTimestamp(),
       }),
-      // The org the Phase-4 medications LIST rule gates on
-      // (canListRecipientsInOrg(resource.data.orgId)).
+      // Still written on create (the create rule requires it), even though the
+      // recipient-scoped LIST rule no longer reads it.
       'orgId': FFAppState().activeGroupId,
     });
   }
@@ -74,16 +74,13 @@ void main() {
     );
 
     // The tracker's live stream filter, used verbatim:
-    //   queryMedicationsRecord(
-    //     where('orgId') == activeGroupId
-    //       && where('careRecipientRef') == selected)
-    // BOTH filters are required: the orgId filter is what makes the field
-    // available to the Phase-4 LIST rule during query evaluation.
+    //   queryMedicationsRecord(where('careRecipientRef') == selected)
+    // The recipient filter is the whole query: the medications LIST rule is
+    // recipient-scoped through the document's own careRecipientRef, so the field
+    // the rule reads is exactly the field the query constrains.
     final r1 = FirebaseFirestore.instance.doc('carerecipients/r1');
     final result = await queryMedicationsRecordOnce(
-      queryBuilder: (q) => q
-          .where('orgId', isEqualTo: FFAppState().activeGroupId)
-          .where('careRecipientRef', isEqualTo: r1),
+      queryBuilder: (q) => q.where('careRecipientRef', isEqualTo: r1),
     );
 
     expect(result, hasLength(1));
@@ -103,25 +100,34 @@ void main() {
     await saveMedication(name: 'Lisinopril');
     final other = FirebaseFirestore.instance.doc('carerecipients/other');
     final result = await queryMedicationsRecordOnce(
-      queryBuilder: (q) => q
-          .where('orgId', isEqualTo: FFAppState().activeGroupId)
-          .where('careRecipientRef', isEqualTo: other),
+      queryBuilder: (q) => q.where('careRecipientRef', isEqualTo: other),
     );
     expect(result, isEmpty);
   });
 
-  test('the tracker query does NOT return another org\'s med', () async {
-    await saveMedication(name: 'Lisinopril');
+  test('a LEGACY medication with no orgId is still returned (the owner\'s '
+      'existing records must not need editing)', () async {
+    // Exactly the shape of a record saved before the collection carried orgId:
+    // the recipient reference and nothing else.
     final r1 = FirebaseFirestore.instance.doc('carerecipients/r1');
-    // Same recipient, different org context: the orgId filter keeps the
-    // caller's visible set to their own org (and satisfies the LIST rule, which
-    // gates on the doc's orgId being a real membership).
+    await MedicationsRecord.collection.doc('legacy_med').set({
+      ...createMedicationsRecordData(
+        careRecipientRef: r1,
+        medicationName: 'Amlodipine',
+        timeOfDay: 'Morning',
+        scheduledTime: null,
+        status: 'PENDING',
+        active: true,
+        refillNeeded: false,
+        taken: false,
+      ),
+    });
+
     final result = await queryMedicationsRecordOnce(
-      queryBuilder: (q) => q
-          .where('orgId', isEqualTo: 'org_someone_else')
-          .where('careRecipientRef', isEqualTo: r1),
+      queryBuilder: (q) => q.where('careRecipientRef', isEqualTo: r1),
     );
-    expect(result, isEmpty);
+    expect(result, hasLength(1));
+    expect(result.first.medicationName, 'Amlodipine');
   });
 
   group('isMedicationMorning grouping (Morning/Afternoon sections)', () {

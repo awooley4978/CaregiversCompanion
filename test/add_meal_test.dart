@@ -110,8 +110,8 @@ void main() {
     expect(data['caregiveNote'], 'Ate well this morning');
     // The recipient is the field the create rule gates on...
     expect((data['patientRef'] as dynamic).path, mine.path);
-    // ...and orgId is the field the mealEntries LIST rule gates on, which is why
-    // the dashboard's live meal query can read this doc without a get().
+    // ...and orgId is still written on create (the create rule requires it),
+    // even though the recipient-scoped LIST rule no longer reads it.
     expect(data['orgId'], 'org_test_1');
     expect(data['createdAt'], isA<DateTime>());
 
@@ -130,7 +130,7 @@ void main() {
     await tester.enterText(find.byType(TextField).at(0), 'Turkey Sandwich');
     await tapSave(tester);
 
-    // The dashboard's own read path: orgId + patientRef, newest first.
+    // The dashboard's own read path: patientRef only, newest first.
     final loaded = await mealEntriesForRecipient(recipientRef: mine).first;
     expect(loaded, hasLength(1));
     expect(loaded.single.mealName, 'Turkey Sandwich');
@@ -151,9 +151,9 @@ void main() {
 
   testWidgets('Save with NO active group context prompts and writes nothing',
       (tester) async {
-    // The rules require orgId on create (the LIST rule gates on it), so saving
-    // with no group context must be a clear prompt — never a doc without orgId
-    // and never an opaque permission-denied.
+    // The rules require orgId on create, so saving with no group context must be
+    // a clear prompt — never a doc without orgId and never an opaque
+    // permission-denied.
     FFAppState().activeGroupId = null;
     final mine = recipient('mine');
     await pumpSheet(tester, patientRef: mine);
