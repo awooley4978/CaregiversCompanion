@@ -469,8 +469,16 @@ service cloud.firestore {
       // for reads and updates.
       allow create: if canWriteRecipientData(get(request.resource.data.careRecipientRef).id)
         && request.resource.data.orgId is string;
-      allow update, delete:
+      // update keeps the full write gate (caregivers keep add / edit /
+      // mark-taken). DELETE is narrower (owner decision 2026-11-20): permanent
+      // removal of a medication needs owner or admin of the recipient's OWN
+      // org, resolved from the document's own careRecipientRef — never from a
+      // stored orgId, because legacy medication docs carry only the reference.
+      // A share-grantee and a viewer can still edit but never delete.
+      allow update:
         if canWriteRecipientData(get(resource.data.careRecipientRef).id);
+      allow delete:
+        if memberHasRole(recipientOrgId(get(resource.data.careRecipientRef).id), ['owner', 'admin']);
     }
 
     // ---------------------------------------------------------------------------

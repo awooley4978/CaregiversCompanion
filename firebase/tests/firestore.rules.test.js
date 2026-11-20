@@ -289,6 +289,129 @@ describe('MEDICATIONS (recipient-scoped reads; legacy docs with no orgId)', () =
 });
 
 // ---------------------------------------------------------------------------
+// MEDICATIONS — DELETE is owner/admin of the recipient's OWN org only
+// (owner decision 2026-11-20). `update` keeps the full canWriteRecipientData
+// gate, so caregivers keep add / edit / mark-taken; `delete` requires
+// owner or admin of the org that owns the recipient, resolved from the
+// document's own careRecipientRef (legacy medications carry no orgId, so a
+// stored field could not be used). The grantee case is the sharp one: the
+// grantee IS owner of their own org (org_grantee), so a delete rule that read
+// the caller's active group instead of the recipient's org would let them
+// through — it must stay denied. Every mutation case gets its own fixture doc
+// so no test mutates another's.
+// ---------------------------------------------------------------------------
+describe('MEDICATIONS (delete = owner/admin of the recipient org only)', () => {
+  const ADMIN  = 'uid_med_admin';   // admin in org_fam
+  const VIEWER = 'uid_med_viewer';  // viewer in org_fam (read-only role)
+
+  before(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      const set = (p, d) => db.doc(p).set(d);
+      await set('users/' + ADMIN,  { activeGroupId: ORG_FAM });
+      await set('users/' + VIEWER, { activeGroupId: ORG_FAM });
+      await set(`organizations/${ORG_FAM}/members/${ADMIN}`,
+        { uid: ADMIN, role: 'admin', status: 'active' });
+      await set(`organizations/${ORG_FAM}/members/${VIEWER}`,
+        { uid: VIEWER, role: 'viewer', status: 'active' });
+      // per-case fixtures on the shared org_fam recipient
+      for (const id of ['med_upd_owner', 'med_upd_admin', 'med_upd_caregiver',
+                        'med_upd_viewer', 'med_upd_grantee', 'med_upd_stranger',
+                        'med_upd_anon', 'med_del_owner', 'med_del_admin',
+                        'med_del_caregiver', 'med_del_viewer', 'med_del_grantee',
+                        'med_del_stranger', 'med_del_anon']) {
+        await set('medications/' + id,
+          { careRecipientRef: F1ref, medicationName: 'Fixture', taken: false, orgId: ORG_FAM });
+      }
+      // LEGACY fixtures: the owner's live record shape — careRecipientRef only.
+      await set('medications/med_legacy_upd',
+        { careRecipientRef: F1ref, medicationName: 'Amlodipine', taken: false });
+      await set('medications/med_legacy_del',
+        { careRecipientRef: F1ref, medicationName: 'Amlodipine', taken: false });
+    });
+  });
+
+  const anon = () => env.unauthenticatedContext().firestore();
+  const listFam = (db) => db.collection('medications')
+    .where('careRecipientRef', '==', F1ref).get();
+
+  // ------------------------------------------------------------------ get
+  it('GET: owner, admin, caregiver, viewer and grantee can read; stranger and signed-out cannot', async () => {
+    await assertSucceeds(dbFor(OWNER).doc('medications/med1').get());
+    await assertSucceeds(dbFor(ADMIN).doc('medications/med1').get());
+    await assertSucceeds(dbFor(CAREGIVER).doc('medications/med1').get());
+    await assertSucceeds(dbFor(VIEWER).doc('medications/med1').get());
+    await assertSucceeds(dbFor(GRANTEE).doc('medications/med1').get());
+    await assertFails(dbFor(STRANGER).doc('medications/med1').get());
+    await assertFails(anon().doc('medications/med1').get());
+  });
+
+  // ------------------------------------------------------------------ list
+  it('LIST (careRecipientRef only): owner, admin, caregiver, viewer and grantee succeed; stranger and signed-out denied', async () => {
+    await assertSucceeds(listFam(dbFor(OWNER)));
+    await assertSucceeds(listFam(dbFor(ADMIN)));
+    await assertSucceeds(listFam(dbFor(CAREGIVER)));
+    await assertSucceeds(listFam(dbFor(VIEWER)));
+    await assertSucceeds(listFam(dbFor(GRANTEE)));
+    await assertFails(listFam(dbFor(STRANGER)));
+    await assertFails(listFam(anon()));
+  });
+
+  // ---------------------------------------------------------------- update
+  it('UPDATE: owner, admin, caregiver and grantee succeed (edit / mark-taken kept)', async () => {
+    await assertSucceeds(dbFor(OWNER).doc('medications/med_upd_owner').update({ taken: true }));
+    await assertSucceeds(dbFor(ADMIN).doc('medications/med_upd_admin').update({ taken: true }));
+    await assertSucceeds(dbFor(CAREGIVER).doc('medications/med_upd_caregiver').update({ taken: true }));
+    await assertSucceeds(dbFor(GRANTEE).doc('medications/med_upd_grantee').update({ taken: true }));
+  });
+  it('UPDATE: viewer, stranger and signed-out are DENIED', async () => {
+    await assertFails(dbFor(VIEWER).doc('medications/med_upd_viewer').update({ taken: true }));
+    await assertFails(dbFor(STRANGER).doc('medications/med_upd_stranger').update({ taken: true }));
+    await assertFails(anon().doc('medications/med_upd_anon').update({ taken: true }));
+  });
+
+  // ---------------------------------------------------------------- delete
+  it('DELETE: owner of the recipient org SUCCEEDS', async () => {
+    await assertSucceeds(dbFor(OWNER).doc('medications/med_del_owner').delete());
+  });
+  it('DELETE: admin of the recipient org SUCCEEDS', async () => {
+    await assertSucceeds(dbFor(ADMIN).doc('medications/med_del_admin').delete());
+  });
+  it('DELETE: caregiver is DENIED (can still edit, cannot remove)', async () => {
+    await assertFails(dbFor(CAREGIVER).doc('medications/med_del_caregiver').delete());
+  });
+  it('DELETE: viewer is DENIED', async () => {
+    await assertFails(dbFor(VIEWER).doc('medications/med_del_viewer').delete());
+  });
+  it('DELETE: share-grantee is DENIED even though they own their own org', async () => {
+    await assertFails(dbFor(GRANTEE).doc('medications/med_del_grantee').delete());
+  });
+  it('DELETE: stranger and signed-out are DENIED', async () => {
+    await assertFails(dbFor(STRANGER).doc('medications/med_del_stranger').delete());
+    await assertFails(anon().doc('medications/med_del_anon').delete());
+  });
+
+  // ---------------------------------------------------------------- legacy
+  it('LEGACY (no orgId): caregiver can READ it', async () => {
+    await assertSucceeds(dbFor(CAREGIVER).doc('medications/med_legacy').get());
+  });
+  it('LEGACY (no orgId): caregiver can UPDATE it', async () => {
+    await assertSucceeds(dbFor(CAREGIVER).doc('medications/med_legacy_upd').update({
+      taken: true, status: 'TAKEN',
+    }));
+  });
+  it('LEGACY (no orgId): caregiver DELETE is DENIED', async () => {
+    await assertFails(dbFor(CAREGIVER).doc('medications/med_legacy_upd').delete());
+  });
+  it('LEGACY (no orgId): owner DELETE SUCCEEDS (org resolved from careRecipientRef)', async () => {
+    await assertSucceeds(dbFor(OWNER).doc('medications/med_legacy_del').delete());
+  });
+  it('LEGACY (no orgId): stranger DELETE is DENIED', async () => {
+    await assertFails(dbFor(STRANGER).doc('medications/med_legacy_upd').delete());
+  });
+});
+
+// ---------------------------------------------------------------------------
 // MEALENTRIES (ref-linked via patientRef — recipient-scoped reads, 2026-11-19).
 // Same shape as medications: the Daily Dashboard's 'Meals and Hydration' card
 // lists the resolved recipient's meals with a LIVE LIST query
