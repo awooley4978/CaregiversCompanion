@@ -105,9 +105,10 @@ void main() {
     String directions = '',
     String status = '',
     bool active = true,
+    String? orgId = 'org_test',
   }) async {
     await MedicationsRecord.collection.doc(id).set({
-      'orgId': 'org_test',
+      if (orgId != null) 'orgId': orgId,
       'careRecipientRef': patient,
       'medicationName': name,
       'dose': dose,
@@ -249,6 +250,30 @@ void main() {
       expect(report.notes.first.category, 'Sleep');
       // The current medication list is not date-ranged.
       expect(report.medications.map((m) => m.name), ['Lisinopril']);
+    });
+
+    test('a medication saved without an orgId still reaches the report',
+        () async {
+      final mom = recipient('mom');
+      await seedRecipient('mom');
+      FFAppState().activeGroupId = 'org_test';
+
+      // The owner's real-world case: a medication saved before the collection
+      // carried orgId. The read is recipient-scoped only, so it is included.
+      await seedMedication('m_legacy',
+          patient: mom, name: 'Furosemide', dose: '20mg', orgId: null);
+      // Another recipient's medication is still excluded.
+      await seedMedication('m_other',
+          patient: recipient('dad'), name: 'Atorvastatin');
+
+      final report = await loadCareReportData(
+        recipientRef: mom,
+        range: careReportRangeFor(CareReportPreset.last7Days, now: now),
+        generatedAt: now,
+      );
+
+      expect(report.medications.map((m) => m.name), ['Furosemide']);
+      expect(report.medications.single.dose, '20mg');
     });
 
     test('a period with no records reports no records, and omits sections',

@@ -28,8 +28,8 @@
 //
 // No new collection, field, rule or index: every read below is one a shipped
 // screen already performs, with the same recipient scoping the merged rules
-// require (`careRecipientRef` on vitals / water / appointments / care notes,
-// plus `orgId` on medications). Nothing is written here.
+// require (`careRecipientRef` on vitals / water / appointments / care notes /
+// medications). Nothing is written here.
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 
@@ -438,10 +438,11 @@ WeeklySummaryData assembleWeeklySummary({
 /// Reads the recipient's records and assembles the Weekly Summary for [range].
 ///
 /// Each read is recipient-scoped exactly as the merged rules require (a bare
-/// list or an `orgId`-only query is denied), and medications also filter the
-/// stored `orgId` because that list rule gates on it. Reads happen first and a
-/// failure is rethrown, so the page shows a real error instead of a fabricated
-/// zero.
+/// list or an `orgId`-only query is denied), on the field each collection's
+/// LIST rule reads — `careRecipientRef` for every collection here, including
+/// medications, which no longer filter a stored `orgId` (legacy medication
+/// documents carry none). Reads happen first and a failure is rethrown, so the
+/// page shows a real error instead of a fabricated zero.
 Future<WeeklySummaryData> loadWeeklySummary({
   required DocumentReference recipientRef,
   required CareReportRange range,
@@ -473,11 +474,8 @@ Future<WeeklySummaryData> loadWeeklySummary({
         query.where('careRecipientRef', isEqualTo: recipientRef),
   );
   final medications = await queryMedicationsRecordOnce(
-    queryBuilder: (query) => orgId.isEmpty
-        ? query.where('careRecipientRef', isEqualTo: recipientRef)
-        : query
-            .where('orgId', isEqualTo: orgId)
-            .where('careRecipientRef', isEqualTo: recipientRef),
+    queryBuilder: (query) =>
+        query.where('careRecipientRef', isEqualTo: recipientRef),
   );
 
   // Real author names: vitals and water store a uid, appointments too; care

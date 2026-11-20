@@ -142,10 +142,10 @@ void main() {
     required String name,
     String dose = '',
     String directions = '',
-    String orgId = 'org_test',
+    String? orgId = 'org_test',
   }) async {
     await MedicationsRecord.collection.doc(id).set({
-      'orgId': orgId,
+      if (orgId != null) 'orgId': orgId,
       'careRecipientRef': patient,
       'medicationName': name,
       'dose': dose,
@@ -420,7 +420,7 @@ void main() {
   });
 
   group('Medications', () {
-    test('the current list and its real count, scoped to the recipient and org',
+    test('the current list and its real count, scoped to the recipient only',
         () async {
       final mom = recipient('mom');
       await seedRecipient('mom');
@@ -430,17 +430,21 @@ void main() {
           patient: mom, name: 'Metformin', dose: '500mg', directions: 'With breakfast');
       await seedMedication('m2',
           patient: mom, name: 'Lisinopril', dose: '10mg');
-      // Another organisation's list: never mixed in.
+      // A stored orgId no longer filters the list: the recipient is the scope.
       await seedMedication('m3',
           patient: mom, name: 'Warfarin', orgId: 'org_other');
+      // The owner's real-world case: a medication saved before the collection
+      // carried orgId must still reach the report.
+      await seedMedication('m5', patient: mom, name: 'Aspirin', orgId: null);
       // Another recipient's medication.
       await seedMedication('m4', patient: recipient('dad'), name: 'Atorvastatin');
 
       final summary = await loadWeeklySummary(recipientRef: mom, range: week);
 
-      expect(summary.medications.map((m) => m.name), ['Lisinopril', 'Metformin']);
-      expect(summary.medications.first.dose, '10mg');
-      expect(summary.medications.last.schedule, 'With breakfast');
+      expect(summary.medications.map((m) => m.name),
+          ['Aspirin', 'Lisinopril', 'Metformin', 'Warfarin']);
+      expect(summary.medications[1].dose, '10mg');
+      expect(summary.medications[2].schedule, 'With breakfast');
     });
   });
 

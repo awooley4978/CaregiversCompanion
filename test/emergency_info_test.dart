@@ -204,4 +204,30 @@ void main() {
     expect(printed.contains('Penicillin'), isFalse);
     expect(printed.contains('James Jenkins'), isFalse);
   });
+
+  test('a medication saved without an orgId still prints', () async {
+    await recipientRef().set({
+      'Name': 'Margaret Alvarez',
+      'orgId': 'org_test',
+    });
+    // The owner's real-world case: saved before the collection carried orgId.
+    // The read is recipient-scoped only, so it is included.
+    await MedicationsRecord.collection.doc('m_legacy').set({
+      'careRecipientRef': recipientRef(),
+      'medicationName': 'Furosemide',
+      'dose': '20mg',
+      'directions': '1 tablet daily',
+    });
+
+    final info = await EmergencyInfoData.load(
+      recipientRef: recipientRef(),
+      generatedAt: DateTime(2026, 11, 13, 9, 30),
+    );
+
+    expect(info.medications.map((medication) => medication.name),
+        ['Furosemide']);
+
+    final printed = pdfText(await buildEmergencyInfoPdf(info));
+    expect(printed, contains('Furosemide 20mg - 1 tablet daily'));
+  });
 }

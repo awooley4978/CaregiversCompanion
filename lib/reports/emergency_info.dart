@@ -134,24 +134,21 @@ class EmergencyInfoData {
   /// Reads the recipient's profile and medication list into [EmergencyInfoData].
   ///
   /// Reads only what the app can already access: the recipient document and the
-  /// org-scoped medication list (the same scoped read the Medication Tracker and
-  /// the care report use). A failed read is rethrown so the caller can say so
-  /// instead of showing an invented empty profile.
+  /// recipient's medication list (the same scoped read the Medication Tracker
+  /// and the care report use). A failed read is rethrown so the caller can say
+  /// so instead of showing an invented empty profile.
   static Future<EmergencyInfoData> load({
     required DocumentReference recipientRef,
     DateTime? generatedAt,
   }) async {
     final recipient = await CareRecipientsRecord.getDocumentOnce(recipientRef);
-    final activeGroupId = (FFAppState().activeGroupId ?? '').trim();
-    final orgId =
-        activeGroupId.isNotEmpty ? activeGroupId : recipient.orgId.trim();
 
+    // The medications LIST rule is recipient-scoped through the document's own
+    // careRecipientRef, so the query filters on the recipient only: a stored
+    // orgId would hide every medication saved before the collection carried it.
     final medications = await queryMedicationsRecordOnce(
-      queryBuilder: (query) => orgId.isEmpty
-          ? query.where('careRecipientRef', isEqualTo: recipientRef)
-          : query
-              .where('orgId', isEqualTo: orgId)
-              .where('careRecipientRef', isEqualTo: recipientRef),
+      queryBuilder: (query) =>
+          query.where('careRecipientRef', isEqualTo: recipientRef),
     );
     medications.sort((a, b) => a.medicationName
         .toLowerCase()
