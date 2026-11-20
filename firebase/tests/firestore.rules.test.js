@@ -1725,3 +1725,220 @@ describe('careRecipients UPDATE — VitalsTargets (per-recipient target ranges)'
     assert.deepEqual(d.VitalsTargets, targets({ bloodGlucose: { min: 70, max: 180 } }));
   });
 });
+
+// ---------------------------------------------------------------------------
+// MEMBERSHIP STATUS HARDENING (owner-approved 2026-11-20).
+//
+// Existence of a member doc used to BE the active-membership test. A doc KEPT
+// with status 'removed' (an owner/admin merge) or a uid-keyed doc with status
+// 'invited' (which the members create rule permits) also exists, so both passed
+// every gate: the recipient picker LIST, single-doc GET and write. These cases
+// pin the ten identity classes against the four operations each could reach, and
+// pin the two things that must NOT change: a LEGACY member doc with no `status`
+// field keeps full access, and no role restriction moves (the change is
+// narrowing-only — it can remove access, never grant it).
+//
+// Grantee/stranger orgs are deliberately distinct from each other: a grantee's
+// activeGroupId is the org that HOLDS the share, so a stranger sharing it would
+// inherit the grant.
+// ---------------------------------------------------------------------------
+describe('MEMBERSHIP STATUS — a non-active member doc grants nothing (2026-11-20)', () => {
+  const assert = require('assert/strict');
+
+  const ORG_MS       = 'org_ms';        // the org under test (family, owner: MS_OWNER)
+  const ORG_MS_SHARE = 'org_ms_share';  // the grantee's own org — holds the share
+  const ORG_MS_OUT   = 'org_ms_out';    // unrelated org — the stranger's
+
+  const MS_OWNER     = 'uid_ms_owner';     // uid-keyed, owner,     status active
+  const MS_ADMIN     = 'uid_ms_admin';     // uid-keyed, admin,     status active
+  const MS_CAREGIVER = 'uid_ms_caregiver'; // uid-keyed, caregiver, status active
+  const MS_VIEWER    = 'uid_ms_viewer';    // uid-keyed, viewer,    status active
+  const MS_LEGACY    = 'uid_ms_legacy';    // uid-keyed, caregiver, NO status field
+  const MS_INVITED   = 'uid_ms_invited';   // uid-keyed, caregiver, status invited
+  const MS_REMOVED   = 'uid_ms_removed';   // uid-keyed, caregiver, status removed (KEPT)
+  const MS_GRANTEE   = 'uid_ms_grantee';   // NO member doc; share to ORG_MS
+  const MS_STRANGER  = 'uid_ms_stranger';  // member of ORG_MS_OUT only
+
+  const MOM     = 'ms_mom';     // the recipient every identity tries to reach
+  const MOM_DEL = 'ms_mom_del'; // owner-only delete target (deleted nowhere else)
+
+  const momPath   = (id) => 'careRecipients/' + id;
+  const memberPath = (uid) => `organizations/${ORG_MS}/members/${uid}`;
+  // The app's exact picker query: no orderBy, no limit.
+  const picker = (uid) =>
+    dbFor(uid).collection('careRecipients').where('orgId', '==', ORG_MS);
+
+  before(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      const set = (p, d) => db.doc(p).set(d);
+      // users: every identity's activeGroupId is the org it acts from.
+      for (const uid of [MS_OWNER, MS_ADMIN, MS_CAREGIVER, MS_VIEWER,
+                         MS_LEGACY, MS_INVITED, MS_REMOVED]) {
+        await set('users/' + uid, { activeGroupId: ORG_MS });
+      }
+      await set('users/' + MS_GRANTEE,  { activeGroupId: ORG_MS_SHARE });
+      await set('users/' + MS_STRANGER, { activeGroupId: ORG_MS_OUT });
+      // organizations
+      await set('organizations/' + ORG_MS,       { kind: 'family', createdBy: MS_OWNER });
+      await set('organizations/' + ORG_MS_SHARE, { kind: 'family', createdBy: MS_GRANTEE });
+      await set('organizations/' + ORG_MS_OUT,   { kind: 'family', createdBy: MS_STRANGER });
+      // members — the seven identity docs (the grantee has none)
+      await set(memberPath(MS_OWNER),     { uid: MS_OWNER,     role: 'owner',     status: 'active' });
+      await set(memberPath(MS_ADMIN),     { uid: MS_ADMIN,     role: 'admin',     status: 'active' });
+      await set(memberPath(MS_CAREGIVER), { uid: MS_CAREGIVER, role: 'caregiver', status: 'active' });
+      await set(memberPath(MS_VIEWER),    { uid: MS_VIEWER,    role: 'viewer',    status: 'active' });
+      // LEGACY: written before the status field existed — no `status` key at all.
+      await set(memberPath(MS_LEGACY),    { uid: MS_LEGACY,    role: 'caregiver' });
+      // The two exploit states the current rules allow an owner/admin to create.
+      await set(memberPath(MS_INVITED),   { uid: MS_INVITED,   role: 'caregiver', status: 'invited' });
+      await set(memberPath(MS_REMOVED),   { uid: MS_REMOVED,   role: 'caregiver', status: 'removed' });
+      await set(`organizations/${ORG_MS_SHARE}/members/${MS_GRANTEE}`,
+        { uid: MS_GRANTEE, role: 'owner', status: 'active' });
+      await set(`organizations/${ORG_MS_OUT}/members/${MS_STRANGER}`,
+        { uid: MS_STRANGER, role: 'owner', status: 'active' });
+      // recipients + the caregiver-level share to the grantee's org
+      await set(momPath(MOM),     { orgId: ORG_MS });
+      await set(momPath(MOM_DEL), { orgId: ORG_MS });
+      await set(`recipientShares/${MOM}/grants/${ORG_MS_SHARE}`, { accessLevel: 'caregiver' });
+    });
+  });
+
+  // --------------------------------------------------------------- ACTIVE roles
+  it('owner (status active): picker list, GET, write and another member doc ALLOWED', async () => {
+    await assertSucceeds(picker(MS_OWNER).get());
+    await assertSucceeds(dbFor(MS_OWNER).doc(momPath(MOM)).get());
+    await assertSucceeds(dbFor(MS_OWNER).doc(momPath(MOM)).update({ orgId: ORG_MS }));
+    await assertSucceeds(dbFor(MS_OWNER).doc(memberPath(MS_CAREGIVER)).get());
+  });
+
+  it('admin (status active): picker list, GET, write and another member doc ALLOWED', async () => {
+    await assertSucceeds(picker(MS_ADMIN).get());
+    await assertSucceeds(dbFor(MS_ADMIN).doc(momPath(MOM)).get());
+    await assertSucceeds(dbFor(MS_ADMIN).doc(momPath(MOM)).update({ orgId: ORG_MS }));
+    await assertSucceeds(dbFor(MS_ADMIN).doc(memberPath(MS_OWNER)).get());
+  });
+
+  it('caregiver (status active): picker list, GET, write and another member doc ALLOWED', async () => {
+    await assertSucceeds(picker(MS_CAREGIVER).get());
+    await assertSucceeds(dbFor(MS_CAREGIVER).doc(momPath(MOM)).get());
+    await assertSucceeds(dbFor(MS_CAREGIVER).doc(momPath(MOM)).update({ orgId: ORG_MS }));
+    await assertSucceeds(dbFor(MS_CAREGIVER).doc(memberPath(MS_OWNER)).get());
+  });
+
+  it('viewer (status active): list and GET ALLOWED, WRITE DENIED (role restriction unchanged)', async () => {
+    await assertSucceeds(picker(MS_VIEWER).get());
+    await assertSucceeds(dbFor(MS_VIEWER).doc(momPath(MOM)).get());
+    await assertFails(dbFor(MS_VIEWER).doc(momPath(MOM)).update({ orgId: ORG_MS }));
+    await assertSucceeds(dbFor(MS_VIEWER).doc(memberPath(MS_OWNER)).get());
+  });
+
+  // ------------------------------------------------- THE regression that matters
+  it('LEGACY member (no status field): list, GET, write and another member doc ALLOWED', async () => {
+    const snap = await picker(MS_LEGACY).get().catch((e) => { throw e; });
+    assert.ok(snap.docs.some((d) => d.id === MOM),
+      'the legacy member must still see the recipient in the picker');
+    await assertSucceeds(dbFor(MS_LEGACY).doc(momPath(MOM)).get());
+    await assertSucceeds(dbFor(MS_LEGACY).doc(momPath(MOM)).update({ orgId: ORG_MS }));
+    await assertSucceeds(dbFor(MS_LEGACY).doc(memberPath(MS_OWNER)).get());
+  });
+
+  it('LEGACY member (no status field) can still switch context INTO the org', async () => {
+    // Start them out of context, then let them switch back in under the rules.
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('users/' + MS_LEGACY).set({ activeGroupId: ORG_MS_OUT });
+    });
+    await assertSucceeds(dbFor(MS_LEGACY).doc('users/' + MS_LEGACY)
+      .update({ activeGroupId: ORG_MS }));
+  });
+
+  // ------------------------------------------------------- NON-ACTIVE (exploits)
+  it('INVITED (uid-keyed, status invited): list, GET, write and member doc ALL DENIED', async () => {
+    await assertFails(picker(MS_INVITED).get());
+    await assertFails(dbFor(MS_INVITED).doc(momPath(MOM)).get());
+    await assertFails(dbFor(MS_INVITED).doc(momPath(MOM)).update({ orgId: ORG_MS }));
+    await assertFails(dbFor(MS_INVITED).doc(memberPath(MS_OWNER)).get());
+  });
+
+  it('REMOVED (kept doc, status removed): list, GET, write and member doc ALL DENIED', async () => {
+    await assertFails(picker(MS_REMOVED).get());
+    await assertFails(dbFor(MS_REMOVED).doc(momPath(MOM)).get());
+    await assertFails(dbFor(MS_REMOVED).doc(momPath(MOM)).update({ orgId: ORG_MS }));
+    await assertFails(dbFor(MS_REMOVED).doc(memberPath(MS_OWNER)).get());
+  });
+
+  it('REMOVED / INVITED keep their OWN member doc self-read (out of scope, unchanged)', async () => {
+    await assertSucceeds(dbFor(MS_REMOVED).doc(memberPath(MS_REMOVED)).get());
+    await assertSucceeds(dbFor(MS_INVITED).doc(memberPath(MS_INVITED)).get());
+  });
+
+  it('REMOVED / INVITED cannot switch context INTO the org (isValidGroupContext)', async () => {
+    // Both start out of context, so the switch is a real diff (not a no-op).
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await db.doc('users/' + MS_REMOVED).set({ activeGroupId: ORG_MS_OUT });
+      await db.doc('users/' + MS_INVITED).set({ activeGroupId: ORG_MS_OUT });
+    });
+    await assertFails(dbFor(MS_REMOVED).doc('users/' + MS_REMOVED)
+      .update({ activeGroupId: ORG_MS }));
+    await assertFails(dbFor(MS_INVITED).doc('users/' + MS_INVITED)
+      .update({ activeGroupId: ORG_MS }));
+  });
+
+  // --------------------------------------------------------------- GRANTEE (share)
+  it('grantee (no member doc) keeps GET and WRITE via the share branch', async () => {
+    await assertSucceeds(dbFor(MS_GRANTEE).doc(momPath(MOM)).get());
+    await assertSucceeds(dbFor(MS_GRANTEE).doc(momPath(MOM)).update({ orgId: ORG_MS }));
+  });
+
+  it('grantee still CANNOT list the org\'s recipients (unchanged: no member doc)', async () => {
+    await assertFails(picker(MS_GRANTEE).get());
+  });
+
+  // ------------------------------------------------------ STRANGER / SIGNED OUT
+  it('stranger (member of another org only): everything DENIED', async () => {
+    await assertFails(picker(MS_STRANGER).get());
+    await assertFails(dbFor(MS_STRANGER).doc(momPath(MOM)).get());
+    await assertFails(dbFor(MS_STRANGER).doc(momPath(MOM)).update({ orgId: ORG_MS }));
+    await assertFails(dbFor(MS_STRANGER).doc(memberPath(MS_OWNER)).get());
+  });
+
+  it('signed out: everything DENIED', async () => {
+    const anon = env.unauthenticatedContext().firestore();
+    await assertFails(anon.collection('careRecipients').where('orgId', '==', ORG_MS).get());
+    await assertFails(anon.doc(momPath(MOM)).get());
+    await assertFails(anon.doc(momPath(MOM)).update({ orgId: ORG_MS }));
+    await assertFails(anon.doc(memberPath(MS_OWNER)).get());
+  });
+
+  // -------------------------------------------- role restrictions stay put (3)
+  it('admin cannot create an OWNER member doc (role restriction unchanged)', async () => {
+    await assertFails(dbFor(MS_ADMIN).doc(memberPath('uid_ms_new')).set({
+      uid: 'uid_ms_new', role: 'owner', status: 'invited',
+      invitedEmail: 'new@example.com',
+    }));
+    // …but the same invite as a caregiver is still permitted.
+    await assertSucceeds(dbFor(MS_ADMIN).doc(memberPath('uid_ms_new2')).set({
+      uid: 'uid_ms_new2', role: 'caregiver', status: 'invited',
+      invitedEmail: 'new2@example.com',
+    }));
+  });
+
+  it('owner retains DELETE of a recipient; caregiver still cannot', async () => {
+    await assertFails(dbFor(MS_CAREGIVER).doc(momPath(MOM_DEL)).delete());
+    await assertSucceeds(dbFor(MS_OWNER).doc(momPath(MOM_DEL)).delete());
+  });
+
+  it('a kept REMOVED owner/admin doc grants nothing (delete + org update DENIED)', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await db.doc(`organizations/${ORG_MS}/members/uid_ms_removed_owner`).set({
+        uid: 'uid_ms_removed_owner', role: 'owner', status: 'removed',
+      });
+      await db.doc('users/uid_ms_removed_owner').set({ activeGroupId: ORG_MS });
+    });
+    await assertFails(dbFor('uid_ms_removed_owner').doc('organizations/' + ORG_MS)
+      .update({ displayName: 'x' }));
+    await assertFails(dbFor('uid_ms_removed_owner').doc(momPath(MOM)).delete());
+  });
+});
