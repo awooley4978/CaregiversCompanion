@@ -215,12 +215,12 @@ int mealEntriesNewestFirst(MealEntriesRecord a, MealEntriesRecord b) {
 /// 'Meals and Hydration' card (owner round-5, symptom 1: a saved meal was
 /// invisible everywhere in the app because nothing read this collection).
 ///
-/// The query is scoped EXACTLY like the medications list (orgId == the caller's
-/// active group AND patientRef == the recipient) for the same Phase-4 rules
-/// reason: a Firestore LIST rule cannot `get()` a candidate document, so the
-/// mealEntries LIST rule gates on the STORED orgId (canListRecipientsInOrg) and
-/// only a query that filters on that field can read it. Without the orgId filter
-/// the list is denied live even after a confirmed save.
+/// The query filters on the recipient ONLY (patientRef == the recipient): the
+/// mealEntries LIST rule is recipient-scoped through the document's own
+/// patientRef, and Firestore exposes that field to the rule because the query
+/// constrains it. No orgId filter is applied - it would hide every meal saved
+/// before the collection carried orgId (the owner's existing data), and the
+/// rule no longer reads that field.
 @visibleForTesting
 Stream<List<MealEntriesRecord>> mealEntriesForRecipient({
   required DocumentReference? recipientRef,
@@ -230,16 +230,16 @@ Stream<List<MealEntriesRecord>> mealEntriesForRecipient({
     return Stream.value(const []);
   }
   return queryMealEntriesRecord(
-    queryBuilder: (q) => q
-        .where('orgId', isEqualTo: orgId)
-        .where('patientRef', isEqualTo: recipientRef),
+    queryBuilder: (q) => q.where('patientRef', isEqualTo: recipientRef),
   ).map((records) => [...records]..sort(mealEntriesNewestFirst));
 }
 
 /// The resolved recipient's medications - the live stream behind the 'Taken'
 /// dose card, built with the SAME scoped lookup [_markTaken] runs
-/// (orgId + careRecipientRef: the field set the Phase-4 medications LIST rule
-/// gates on). The card used to render hardcoded demo content ('Donepezil
+/// (careRecipientRef: the field the recipient-scoped medications LIST rule
+/// reads). No orgId filter, for the same reason as the meals list: legacy
+/// medication docs carry only careRecipientRef and an orgId filter would hide
+/// them. The card used to render hardcoded demo content ('Donepezil
 /// 10mg') that no record backed, while the Taken button acted on real data -
 /// the contradiction the owner reported as "it's on a dose card".
 @visibleForTesting
@@ -251,9 +251,7 @@ Stream<List<MedicationsRecord>> medicationsForRecipient({
     return Stream.value(const []);
   }
   return queryMedicationsRecord(
-    queryBuilder: (q) => q
-        .where('orgId', isEqualTo: orgId)
-        .where('careRecipientRef', isEqualTo: recipientRef),
+    queryBuilder: (q) => q.where('careRecipientRef', isEqualTo: recipientRef),
   );
 }
 
@@ -453,10 +451,10 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
   /// `medicationTakenUpdate`), so the Dashboard's 'Taken' button and the
   /// tracker agree on the record shape (taken / status / takenAt).
   ///
-  /// The lookup reuses the tracker's list query verbatim: `orgId` == the
-  /// caller's active group AND `careRecipientRef` == the resolved recipient —
-  /// the field set the Phase-4 `medications` LIST rule gates on, so this is a
-  /// scoped read, never an unscoped one.
+  /// The lookup reuses the tracker's list query verbatim: `careRecipientRef` ==
+  /// the resolved recipient — the field the recipient-scoped `medications` LIST
+  /// rule reads, so this is a scoped read, never an unscoped one. No `orgId`
+  /// filter: legacy medication docs carry only the recipient reference.
   Future<void> _markTaken(BuildContext context) async {
     final recipientRef = _recipientRef;
     final orgId = FFAppState().activeGroupId ?? '';
@@ -478,9 +476,8 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
     }
     try {
       final meds = await queryMedicationsRecordOnce(
-        queryBuilder: (q) => q
-            .where('orgId', isEqualTo: orgId)
-            .where('careRecipientRef', isEqualTo: recipientRef),
+        queryBuilder: (q) =>
+            q.where('careRecipientRef', isEqualTo: recipientRef),
       );
       final dose = nextPendingDose(meds, DateTime.now());
       if (dose == null) {

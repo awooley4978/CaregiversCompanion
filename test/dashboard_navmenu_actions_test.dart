@@ -214,12 +214,11 @@ void main() {
     }
 
     /// The tracker's own list query — the lookup the dashboard's Taken action
-    /// reuses (both filters are required by the Phase-4 medications LIST rule).
+    /// reuses (recipient only: the medications LIST rule is recipient-scoped
+    /// through the document's own careRecipientRef).
     Future<List<MedicationsRecord>> scopedMeds(DocumentReference patient) =>
         queryMedicationsRecordOnce(
-          queryBuilder: (q) => q
-              .where('orgId', isEqualTo: FFAppState().activeGroupId)
-              .where('careRecipientRef', isEqualTo: patient),
+          queryBuilder: (q) => q.where('careRecipientRef', isEqualTo: patient),
         );
 
     test('marks the next PENDING dose taken, scoped to the recipient',
@@ -423,23 +422,22 @@ void main() {
       expect(records.map((r) => r.mealName), ['Soup']);
     });
 
-    test('an org-scoped query never leaks another org\'s meal for the same '
-        'recipient ref', () async {
+    test('a LEGACY meal with no orgId is listed (existing records need no '
+        'editing)', () async {
       final mine = recipient('mine');
       FFAppState().activeGroupId = 'org_test_1';
-      await seedMeal('meal1', mine, 'Mine', DateTime(2026, 9, 22, 12));
-      // A meal written by another org for a same-named recipient ref: the
-      // orgId filter (required by the LIST rule) keeps it out.
-      await MealEntriesRecord.collection.doc('meal_other_org').set({
-        'mealName': 'Not mine',
+      // Exactly the shape of the owner's existing data: the recipient reference
+      // and the meal fields, no orgId. The query filters on patientRef only, so
+      // nothing hides it.
+      await MealEntriesRecord.collection.doc('legacy_meal').set({
+        'mealName': 'Eggs',
         'patientRef': mine,
-        'orgId': 'org_other',
         'createdAt': null,
       });
 
       final records =
           await mealEntriesForRecipient(recipientRef: mine).first;
-      expect(records.map((r) => r.mealName), ['Mine']);
+      expect(records.map((r) => r.mealName), ['Eggs']);
     });
 
     test('a meal saved without a timestamp still loads, newest first',
@@ -470,8 +468,8 @@ void main() {
     });
 
     test('no active group -> empty stream, never an unscoped read', () async {
-      // The mealEntries LIST rule only admits queries that filter on orgId, so an
-      // unscoped query would be denied (and silently empty) — never build one.
+      // The stream needs the caller's group context before it reads at all, so a
+      // half-resolved session never builds a query.
       FFAppState().activeGroupId = null;
       expect(
         await mealEntriesForRecipient(recipientRef: recipient('mine')).first,
@@ -557,8 +555,6 @@ void main() {
       await seedMed('m1', mine, 'Donepezil', DateTime(2026, 9, 22, 8),
           dose: '10mg', directions: 'Take with breakfast');
       await seedMed('m2', other, 'Not mine', DateTime(2026, 9, 22, 7));
-      await seedMed('m3', mine, 'Other org med', DateTime(2026, 9, 22, 9),
-          orgId: 'org_other');
 
       final meds = await medicationsForRecipient(recipientRef: mine).first;
       expect(meds.map((m) => m.medicationName), ['Donepezil']);
@@ -575,6 +571,30 @@ void main() {
         await medicationsForRecipient(recipientRef: recipient('mine')).first,
         isEmpty,
       );
+    });
+
+    test('a LEGACY medication with no orgId reaches the dose card (existing '
+        'records need no editing)', () async {
+      final mine = recipient('mine');
+      FFAppState().activeGroupId = 'org_test_1';
+      // The owner's existing shape: recipient reference, no orgId field.
+      await MedicationsRecord.collection.doc('legacy_med').set({
+        'careRecipientRef': mine,
+        'medicationName': 'Amlodipine',
+        'dose': '5mg',
+        'timeOfDay': 'Morning',
+        'scheduledTime': null,
+        'status': 'PENDING',
+        'active': true,
+        'refillNeeded': false,
+        'taken': false,
+        'takenAt': null,
+      });
+
+      final meds = await medicationsForRecipient(recipientRef: mine).first;
+      expect(meds.map((m) => m.medicationName), ['Amlodipine']);
+      expect(medicationCardHeadline(meds, DateTime(2026, 9, 22, 10)),
+          'Amlodipine 5mg');
     });
 
     test('headline + subtitle describe the real next pending dose', () async {

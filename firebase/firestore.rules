@@ -381,19 +381,23 @@ service cloud.firestore {
     // mealEntries — ref-linked via patientRef (see careNotes note above)
     // ---------------------------------------------------------------------------
     match /mealEntries/{docId} {
-      // Read split (2026-09-23 — mirrors medications): single-doc GET keeps the
-      // FULL gate via canAccessRecipientRef (within-org kind-branched + grantee
-      // share + caregiver/viewer assignment). The Daily Dashboard now lists the
-      // recipient's meals with a LIVE LIST query (`where patientRef ==
-      // recipient`), and Firestore does NOT load documents during query
-      // evaluation — get() throws "Null value error" there — so LIST uses the
-      // exists()-only canListRecipientsInOrg check against the doc's stored
-      // orgId (the writer's active group, added on create for the same reason
-      // careRecipients and medications carry it).
+      // Reads are recipient-scoped for BOTH get and list (2026-11-19): the same
+      // full canAccessRecipientRef gate (within-org kind-branched + grantee
+      // share + caregiver/viewer assignment), resolved from the document's own
+      // patientRef. A get() inside a LIST rule resolves fine here BECAUSE the
+      // app's query must constrain patientRef (the field the rule reads) — that
+      // is what makes this read recipient-scoped and query-compatible at once
+      // (verified in the emulator 2026-11-18). The earlier exists()-only orgId
+      // check is gone because it required a stored orgId on every document, and
+      // legacy meal docs carry only patientRef — they were invisible.
+      // CONSEQUENCE: there is no org-wide meal query; the dashboard filters
+      // `where('patientRef', == selectedRecipient)` and nothing else.
       allow get:    if canAccessRecipientRef(get(resource.data.patientRef).id);
-      allow list:   if canListRecipientsInOrg(resource.data.orgId);
-      // orgId is required on create so every meal carries the org its LIST rule
-      // checks (defensive, mirrors the careRecipients / medications create rule).
+      allow list:   if canAccessRecipientRef(get(resource.data.patientRef).id);
+      // orgId is still required on create (unchanged): the LIST rule no longer
+      // reads it, but every new meal keeps carrying the org its writer was in,
+      // exactly like careRecipients / medications do. Legacy docs without it
+      // stay valid for reads and updates.
       allow create: if canWriteRecipientData(get(request.resource.data.patientRef).id)
         && request.resource.data.orgId is string;
       allow update, delete:
@@ -420,19 +424,24 @@ service cloud.firestore {
     // collection.
     // ---------------------------------------------------------------------------
     match /medications/{docId} {
-      // Read split (2026-08-31 — mirrors careRecipients): single-doc GET keeps
-      // the FULL gate via canAccessRecipientRef (within-org kind-branched +
-      // grantee share + caregiver/viewer assignment). The Medication tracker
-      // pages its schedule with a LIVE LIST query (`where careRecipientRef ==
-      // selected`), and Firestore does NOT load documents during query
-      // evaluation — get() throws "Null value error" there — so LIST uses the
-      // exists()-only canListRecipientsInOrg check against the doc's stored
-      // orgId (the writer's active group, added on create for the same reason
-      // careRecipients carries it).
+      // Reads are recipient-scoped for BOTH get and list (2026-11-19, mirrors
+      // vitalLogs / waterLogs / appointments): the same full
+      // canAccessRecipientRef gate (within-org kind-branched + grantee share +
+      // caregiver/viewer assignment), resolved from the document's own
+      // careRecipientRef. A get() inside a LIST rule resolves fine here BECAUSE
+      // the app's query must constrain careRecipientRef (the field the rule
+      // reads) — verified in the emulator 2026-11-18. The earlier exists()-only
+      // orgId check is gone because it required a stored orgId on every
+      // document, and legacy medication docs carry only careRecipientRef — they
+      // were invisible in the tracker and the dose card.
+      // CONSEQUENCE: there is no org-wide medication query; every read filters
+      // `where('careRecipientRef', == selectedRecipient)`.
       allow get:    if canAccessRecipientRef(get(resource.data.careRecipientRef).id);
-      allow list:   if canListRecipientsInOrg(resource.data.orgId);
-      // orgId is required on create so every medication carries the org its
-      // LIST rule checks (defensive, mirrors the careRecipients create rule).
+      allow list:   if canAccessRecipientRef(get(resource.data.careRecipientRef).id);
+      // orgId is still required on create (unchanged): the LIST rule no longer
+      // reads it, but every new medication keeps carrying the org its writer was
+      // in, exactly like careRecipients does. Legacy docs without it stay valid
+      // for reads and updates.
       allow create: if canWriteRecipientData(get(request.resource.data.careRecipientRef).id)
         && request.resource.data.orgId is string;
       allow update, delete:
