@@ -39,7 +39,25 @@ service cloud.firestore {
     // ---------------------------------------------------------------------------
     // helpers: org membership
     // Active members are uid-keyed and exist only while active (revocation =
-    // delete), so existence IS the active-membership check — one cheap exists().
+    // delete), so existence is the primary active-membership check.
+    //
+    // STATUS HARDENING (owner-approved 2026-11-20): existence ALONE is not
+    // enough — a member doc KEPT with status 'removed' (an admin/owner merge) or
+    // a uid-keyed doc with status 'invited' (which the members create rule
+    // permits) also exists, and would otherwise pass. hasActiveMembership()
+    // therefore also rejects any membership document that CARRIES a status other
+    // than 'active'. Legacy member docs written before the status field existed
+    // have no `status` key at all and stay valid — that is why this is written as
+    // "not (present AND non-active)" and NOT as `status == 'active'`, which
+    // throws "Property status is undefined" and would cut legacy members off.
+    //
+    // get() note: this get() is safe in a LIST rule because memberDoc(orgId)
+    // depends only on the orgId the query constrains (or a value derived from
+    // it), never on each document's own fields — verified in the emulator
+    // 2026-11-20. Paths derived from resource.data of individual documents
+    // still cannot be read in a LIST rule.
+    //
+    // The change is NARROWING ONLY: it can remove access, never grant it.
     // ---------------------------------------------------------------------------
     function signedIn() {
       return request.auth != null;
@@ -49,15 +67,22 @@ service cloud.firestore {
       return /databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid);
     }
 
-    function isActiveMember(orgId) {
-      return signedIn() && orgId is string && exists(memberDoc(orgId));
+    function hasActiveMembership(orgId) {
+      return signedIn() && orgId is string && exists(memberDoc(orgId))
+        && !(('status' in get(memberDoc(orgId)).data)
+             && get(memberDoc(orgId)).data.status != 'active');
     }
 
-    // Single-get membership + role check (hot paths, read-budget friendly). A
-    // missing member doc yields empty data -> .data.role is null -> null in any
-    // role list -> false.
+    function isActiveMember(orgId) {
+      return hasActiveMembership(orgId);
+    }
+
+    // Single-get membership + role check (hot paths, read-budget friendly). The
+    // active-membership test runs FIRST so a missing/absent member doc never
+    // reaches the role dereference; a non-active doc is denied before the role
+    // list is consulted (so a kept 'removed' owner doc grants nothing).
     function memberHasRole(orgId, roles) {
-      return signedIn() && orgId is string && get(memberDoc(orgId)).data.role in roles;
+      return hasActiveMembership(orgId) && get(memberDoc(orgId)).data.role in roles;
     }
 
     function memberRole(orgId) {
@@ -80,7 +105,7 @@ service cloud.firestore {
     // Switching context is legal only to an org the caller actively belongs to.
     function isValidGroupContext() {
       return request.resource.data.activeGroupId is string
-        && exists(/databases/$(database)/documents/organizations/$(request.resource.data.activeGroupId)/members/$(request.auth.uid));
+        && hasActiveMembership(request.resource.data.activeGroupId);
     }
 
     // ---------------------------------------------------------------------------
@@ -171,7 +196,7 @@ service cloud.firestore {
     // Single-doc GETs keep the FULL kind-branched + share + assignment gate via
     // canAccessRecipientRef (get() is fine for single-doc reads).
     function canListRecipientsInOrg(orgId) {
-      return signedIn() && orgId is string && exists(memberDoc(orgId));
+      return hasActiveMembership(orgId);
     }
 
     // Write access to recipient data: family -> member role >= caregiver;
