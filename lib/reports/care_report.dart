@@ -402,14 +402,13 @@ Future<CareReportData> loadCareReportData({
     queryBuilder: (query) =>
         query.where('careRecipientRef', isEqualTo: recipientRef),
   );
-  // The medications LIST rule gates on the stored orgId, so the query must
-  // filter on it (same scoped read the Medication Tracker and Dashboard use).
+  // The medications LIST rule is recipient-scoped through the document's own
+  // careRecipientRef, so the query filters on the recipient only (same scoped
+  // read the Medication Tracker and Dashboard use). An orgId filter would hide
+  // every medication saved before the collection carried it.
   final medications = await queryMedicationsRecordOnce(
-    queryBuilder: (query) => orgId.isEmpty
-        ? query.where('careRecipientRef', isEqualTo: recipientRef)
-        : query
-            .where('orgId', isEqualTo: orgId)
-            .where('careRecipientRef', isEqualTo: recipientRef),
+    queryBuilder: (query) =>
+        query.where('careRecipientRef', isEqualTo: recipientRef),
   );
 
   return assembleCareReport(
