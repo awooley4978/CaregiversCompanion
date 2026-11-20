@@ -205,7 +205,8 @@ void main() {
     expect(printed.contains('James Jenkins'), isFalse);
   });
 
-  test('a medication saved without an orgId still prints', () async {
+  test('a medication saved without an orgId still prints, and another '
+      'recipient\'s medications never do', () async {
     await recipientRef().set({
       'Name': 'Margaret Alvarez',
       'orgId': 'org_test',
@@ -219,15 +220,43 @@ void main() {
       'directions': '1 tablet daily',
     });
 
+    // A second care recipient in the same org, with their own medications: one
+    // saved with the org and one saved without it. Neither belongs to the
+    // selected recipient, so neither may reach the screen or the EMS PDF.
+    final otherRecipientRef =
+        FirebaseFirestore.instance.doc('careRecipients/r2');
+    await otherRecipientRef.set({
+      'Name': 'Harold Alvarez',
+      'orgId': 'org_test',
+    });
+    await MedicationsRecord.collection.doc('m_other_org').set({
+      'orgId': 'org_test',
+      'careRecipientRef': otherRecipientRef,
+      'medicationName': 'Metformin',
+      'dose': '500mg',
+      'directions': '2 tablets daily',
+    });
+    await MedicationsRecord.collection.doc('m_other_legacy').set({
+      'careRecipientRef': otherRecipientRef,
+      'medicationName': 'Warfarin',
+      'dose': '5mg',
+      'directions': '1 tablet daily',
+    });
+
     final info = await EmergencyInfoData.load(
       recipientRef: recipientRef(),
       generatedAt: DateTime(2026, 11, 13, 9, 30),
     );
 
+    // Only the selected recipient's medication, including the org-less one.
     expect(info.medications.map((medication) => medication.name),
         ['Furosemide']);
 
     final printed = pdfText(await buildEmergencyInfoPdf(info));
     expect(printed, contains('Furosemide 20mg - 1 tablet daily'));
+    // The other recipient's medications are absent from the printed report.
+    expect(printed.contains('Metformin'), isFalse);
+    expect(printed.contains('Warfarin'), isFalse);
+    expect(printed.contains('Harold Alvarez'), isFalse);
   });
 }
