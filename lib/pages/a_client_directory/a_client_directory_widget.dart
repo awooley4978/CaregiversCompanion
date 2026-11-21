@@ -75,6 +75,13 @@ class _AClientDirectoryWidgetState extends State<AClientDirectoryWidget> {
 
   @override
   Widget build(BuildContext context) {
+    // The directory can be built before the signed-in user's group context has
+    // resolved (cold start): `careRecipientsForActiveGroup()` then returns an
+    // empty stream and nothing would ever replace it, so the list stayed empty
+    // until an unrelated setState. Watching FFAppState makes the activeGroupId
+    // notification rebuild this page, which re-creates the recipients stream
+    // with the real group filter.
+    context.watch<FFAppState>();
     return GestureDetector(
       onTap: () {
         FocusScope.of(context).unfocus();

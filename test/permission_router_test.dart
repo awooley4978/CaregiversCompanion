@@ -10,6 +10,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 import 'package:caregivers_companion/app_state.dart';
 import 'package:caregivers_companion/backend/permissions/permission_errors.dart';
 import 'package:caregivers_companion/backend/permissions/permission_router.dart';
@@ -50,7 +51,12 @@ void main() {
         ),
       ],
     );
-    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    await tester.pumpWidget(
+      ChangeNotifierProvider<FFAppState>.value(
+        value: FFAppState(),
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
     await tester.tap(find.byKey(const Key('trigger')));
     await tester.pumpAndSettle();
   }

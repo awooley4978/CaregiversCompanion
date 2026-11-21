@@ -17,6 +17,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
+import 'package:caregivers_companion/app_state.dart';
 import 'package:caregivers_companion/components/nav_menu_directory/nav_menu_directory_widget.dart';
 import 'package:caregivers_companion/pages/a_client_directory/a_client_directory_widget.dart';
 import 'package:caregivers_companion/pages/b_care_profile_setup/b_care_profile_setup_widget.dart';
@@ -68,7 +70,12 @@ void main() {
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
     final router = buildRouter();
-    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    await tester.pumpWidget(
+      ChangeNotifierProvider<FFAppState>.value(
+        value: FFAppState(),
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
     await tester.pumpAndSettle();
     return router;
   }

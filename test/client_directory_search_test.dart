@@ -11,6 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:caregivers_companion/app_state.dart';
 import 'package:caregivers_companion/backend/schema/care_recipients_record.dart';
 import 'package:caregivers_companion/pages/a_client_directory/a_client_directory_widget.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'firebase_test_setup.dart';
@@ -49,9 +50,14 @@ void main() {
     tester.view.physicalSize = const Size(1200, 2400);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
-    await tester.pumpWidget(const MaterialApp(
-      home: AClientDirectoryWidget(),
-    ));
+    await tester.pumpWidget(
+      ChangeNotifierProvider<FFAppState>.value(
+        value: FFAppState(),
+        child: const MaterialApp(
+          home: AClientDirectoryWidget(),
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
   }
 
@@ -119,5 +125,23 @@ void main() {
     expect(find.text('Margaret Ellis'), findsOneWidget);
     expect(find.text('Harold Ellis'), findsOneWidget);
     expect(find.text('No care recipients match your search.'), findsNothing);
+  });
+
+  // Cold start: the page is built before the signed-in user's profile has
+  // resolved `activeGroupId`, so the recipients stream is the empty placeholder.
+  // The page must pick the circle up when the group context arrives instead of
+  // staying empty until some unrelated setState.
+  testWidgets('cards appear when the group context arrives later',
+      (tester) async {
+    await seedRecipient('mom', 'Margaret Ellis', 'ME');
+
+    FFAppState().activeGroupId = null;
+    await pumpDirectory(tester);
+    expect(find.text('Margaret Ellis'), findsNothing);
+
+    FFAppState().activeGroupId = orgId;
+    await tester.pumpAndSettle();
+
+    expect(find.text('Margaret Ellis'), findsOneWidget);
   });
 }
