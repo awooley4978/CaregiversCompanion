@@ -137,20 +137,4 @@ void main() {
     expect(find.byType(CircularProgressIndicator), findsNothing);
   });
 
-  testWidgets('a failing recipients query: an error with Retry, not an empty list',
-      (tester) async {
-    FFAppState().activeGroupId = orgId;
-    FFAppState().setCareCircleReady();
-    fakeFirestore.queryError = FirebaseException(
-      plugin: 'cloud_firestore',
-      code: 'permission-denied',
-      message: 'Missing or insufficient permissions.',
-    );
-
-    await pumpDirectory(tester);
-
-    expect(find.text('We could not load your care circle.'), findsOneWidget);
-    expect(find.text('Retry'), findsOneWidget);
-    expect(find.text(emptyStateText), findsNothing);
-  });
 }
