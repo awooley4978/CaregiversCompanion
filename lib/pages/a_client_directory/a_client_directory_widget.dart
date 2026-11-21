@@ -522,6 +522,19 @@ class _AClientDirectoryWidgetState extends State<AClientDirectoryWidget> {
                                         'Please check your connection and try '
                                         'again.');
                                   }
+                                // A recipients stream that ENDS without ever
+                                // producing data is a failed load, not "still
+                                // loading": the generated query helper logs a
+                                // stream error and closes, so the error itself
+                                // never reaches snapshot.hasError and the page
+                                // would otherwise spin forever.
+                                if (snapshot.connectionState ==
+                                        ConnectionState.done &&
+                                    !snapshot.hasData) {
+                                  return _careCircleError(
+                                      'Please check your connection and try '
+                                      'again.');
+                                }
                                 if (!snapshot.hasData) {
                                   return _careCircleLoading();
                                 }
