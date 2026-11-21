@@ -8,6 +8,7 @@ import '/components/dashboard_symptom_card/dashboard_symptom_card_widget.dart';
 import '/components/dashboard_task_add_sheet/dashboard_task_add_sheet_widget.dart';
 import '/components/dashboard_task_card/dashboard_task_card_widget.dart';
 import '/components/daily_water_card/daily_water_card_widget.dart';
+import '/components/local_date_refresh/local_date_refresh.dart';
 import '/components/nav_menu_directory/nav_menu_directory_widget.dart';
 import '/components/patent_picker_sheet_widget.dart';
 import '/components/section_header/section_header_widget.dart';
@@ -297,6 +298,27 @@ String medicationCardSubtitle(List<MedicationsRecord> meds, DateTime now) {
       dateTimeFormat('hh:mm a', dose.scheduledTime),
   ];
   return parts.join(' • ');
+}
+
+/// Whether the dose card's green 'Taken' button should be rendered at all:
+/// only when there is a dose pending for TODAY to act on.
+///
+/// The card used to render the button unconditionally, so beside "All of
+/// today's doses are taken." it offered an action whose only possible answer was
+/// the "No pending dose to mark as taken." snackbar (owner report 2026-11-21).
+/// It is decided by the same [nextPendingDose] the headline and the button's own
+/// write use, so the three can never disagree.
+@visibleForTesting
+bool doseCardShowsTakenButton({
+  required bool hasData,
+  required bool hasError,
+  required List<MedicationsRecord> meds,
+  required DateTime now,
+}) {
+  if (!hasData || hasError) {
+    return false;
+  }
+  return nextPendingDose(meds, now) != null;
 }
 
 /// A meal row's headline: the meal's own name (or its type when the caregiver
@@ -1110,13 +1132,52 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                           padding: EdgeInsets.all(16.0),
                                           child: Container(
                                             decoration: BoxDecoration(),
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.max,
-                                              mainAxisAlignment:
-                                                  MainAxisAlignment.start,
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.center,
-                                              children: [
+                                            child: StreamBuilder<
+                                                List<MedicationsRecord>>(
+                                              // Live replacement for the hardcoded
+                                              // "Donepezil 10mg" demo card: the exact
+                                              // scoped query the Taken button below runs,
+                                              // so the card describes the real record(s)
+                                              // - or says honestly that there are none.
+                                              //
+                                              // It wraps the WHOLE row, not just the
+                                              // headline, because the button's visibility
+                                              // depends on the same records: with no
+                                              // pending dose the button is not rendered
+                                              // (owner report 2026-11-21).
+                                              stream: medicationsForRecipient(
+                                                  recipientRef: _recipientRef),
+                                              builder: (context, snapshot) {
+                                                final meds = snapshot.data ??
+                                                    const <MedicationsRecord>[];
+                                                return LocalDateRefresh(
+                                                  // Re-evaluates the card when the local
+                                                  // date changes - at the next local
+                                                  // midnight and on app resume - so a
+                                                  // dose marked taken yesterday clears
+                                                  // itself with no user action.
+                                                  builder: (context, now) {
+                                                    final doseHeadline = snapshot.hasError
+                                                        ? 'Could not load medications.'
+                                                        : (snapshot.hasData
+                                                            ? medicationCardHeadline(
+                                                                meds, now)
+                                                            : 'Loading medications…');
+                                                    final doseSubtitle =
+                                                        (!snapshot.hasData ||
+                                                                snapshot.hasError)
+                                                            ? ''
+                                                            : medicationCardSubtitle(
+                                                                meds, now);
+                                                    return Row(
+                                                      mainAxisSize:
+                                                          MainAxisSize.max,
+                                                      mainAxisAlignment:
+                                                          MainAxisAlignment.start,
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .center,
+                                                      children: [
                                                 Container(
                                                   width: 48.0,
                                                   height: 48.0,
@@ -1142,26 +1203,7 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                                 ),
                                                 Expanded(
                                                   flex: 1,
-                                                  child: StreamBuilder<List<MedicationsRecord>>(
-                                                    // Live replacement for the hardcoded "Donepezil 10mg" demo
-                                                    // card: the exact scoped query the Taken button below runs, so
-                                                    // the card describes the real record(s) - or says honestly
-                                                    // that there are none.
-                                                    stream: medicationsForRecipient(recipientRef: _recipientRef),
-                                                    builder: (context, snapshot) {
-                                                      final meds = snapshot.data ??
-                                                        const <MedicationsRecord>[];
-                                                      final now = DateTime.now();
-                                                      final doseHeadline = snapshot.hasError
-                                                        ? 'Could not load medications.'
-                                                        : (snapshot.hasData
-                                                          ? medicationCardHeadline(meds, now)
-                                                          : 'Loading medications…');
-                                                      final doseSubtitle =
-                                                        (!snapshot.hasData || snapshot.hasError)
-                                                        ? ''
-                                                        : medicationCardSubtitle(meds, now);
-                                                      return Column(
+                                                  child: Column(
                                                     mainAxisSize:
                                                         MainAxisSize.min,
                                                     mainAxisAlignment:
@@ -1240,10 +1282,14 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                                       ),
                                                     ].divide(
                                                         SizedBox(height: 2.0)),
-                                                  );
-                                                    },
                                                   ),
                                                 ),
+                                                if (doseCardShowsTakenButton(
+                                                  hasData: snapshot.hasData,
+                                                  hasError: snapshot.hasError,
+                                                  meds: meds,
+                                                  now: now,
+                                                ))
                                                 InkWell(
                                                   splashColor:
                                                       Colors.transparent,
@@ -1273,6 +1319,10 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                                   ),
                                                 ),
                                               ].divide(SizedBox(width: 16.0)),
+                                                    );
+                                                  },
+                                                );
+                                              },
                                             ),
                                           ),
                                         ),

@@ -68,6 +68,11 @@ class _MedCardWidgetState extends State<MedCardWidget> {
   void initState() {
     super.initState();
     _model = createModel(context, () => MedCardModel());
+    // The model's `initState` runs before FlutterFlowModel attaches the widget,
+    // so it cannot read `widget.taken` itself (that null-check threw and turned
+    // the Medications page gray). Seed the live state here instead; at this
+    // point the model is built and `didUpdateWidget` below keeps it in sync.
+    _model.taken = widget.taken;
 
     WidgetsBinding.instance.addPostFrameCallback((_) => safeSetState(() {}));
   }
