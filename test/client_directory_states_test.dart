@@ -137,4 +137,24 @@ void main() {
     expect(find.byType(CircularProgressIndicator), findsNothing);
   });
 
+  // The circle resolved (status ready, group known) but the recipients query
+  // itself failed — a rules denial or a network drop. The StreamBuilder's error
+  // must render the failure state, never a silent empty list.
+  testWidgets(
+      'a failing recipients query: an error with Retry, not an empty list',
+      (tester) async {
+    FFAppState().activeGroupId = orgId;
+    FFAppState().setCareCircleReady();
+    fakeFirestore.queryError = FirebaseException(
+      plugin: 'cloud_firestore',
+      code: 'permission-denied',
+      message: 'Missing or insufficient permissions.',
+    );
+
+    await pumpDirectory(tester);
+
+    expect(find.text('We could not load your care circle.'), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
+    expect(find.text(emptyStateText), findsNothing);
+  });
 }
