@@ -6,6 +6,26 @@ import '/backend/schema/enums/enums.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'flutter_flow/flutter_flow_util.dart';
 
+/// How far the signed-in user's care circle has been resolved.
+///
+/// Owner decision 2026-11-21: the Client Directory must never show an empty
+/// list while the care circle is still resolving, nor after a failed
+/// resolution — an empty directory may only mean "the circle really is empty".
+enum CareCircleStatus {
+  /// Provisioning has not started (signed out, or before the auth listener has
+  /// run). Not one of the four display states; see [FFAppState.careCircleStatus].
+  idle,
+
+  /// The care circle is being resolved (`activeGroupId` not known yet).
+  loading,
+
+  /// The care circle resolved; the recipients list is authoritative.
+  ready,
+
+  /// Resolving failed; [FFAppState.careCircleError] carries the message.
+  failed,
+}
+
 class FFAppState extends ChangeNotifier {
   static FFAppState _instance = FFAppState._internal();
 
@@ -67,6 +87,48 @@ class FFAppState extends ChangeNotifier {
     _currentUid = null;
     _selectedCareRecipient = null;
     _activeGroupId = null;
+    _careCircleStatus = CareCircleStatus.idle;
+    _careCircleError = null;
+    notifyListeners();
+  }
+
+  // ---------------------------------------------------------------------
+  // Care-circle resolution status (owner decision 2026-11-21).
+  //
+  // The Client Directory is the landing screen, so it can be built before the
+  // signed-in user's care circle is known — and it used to render that as an
+  // empty list, indistinguishable from a genuine empty circle or from a
+  // technical failure. auth_service.dart sets these while provisioning:
+  // loading before the provisioning calls, ready once `activeGroupId` is
+  // assigned, failed (with a message) when provisioning throws.
+  // ---------------------------------------------------------------------
+
+  CareCircleStatus _careCircleStatus = CareCircleStatus.idle;
+  CareCircleStatus get careCircleStatus => _careCircleStatus;
+
+  String? _careCircleError;
+  String? get careCircleError => _careCircleError;
+
+  /// The care circle is being resolved (also used by the Retry button, so the
+  /// page shows the spinner again while provisioning re-runs).
+  void setCareCircleLoading() {
+    _careCircleStatus = CareCircleStatus.loading;
+    _careCircleError = null;
+    notifyListeners();
+  }
+
+  /// The care circle resolved: the recipients list is now authoritative.
+  void setCareCircleReady() {
+    _careCircleStatus = CareCircleStatus.ready;
+    _careCircleError = null;
+    notifyListeners();
+  }
+
+  /// Resolving failed. [message] is shown on the Client Directory next to the
+  /// Retry button; null falls back to a generic line on the page.
+  void setCareCircleFailed(String? message) {
+    _careCircleStatus = CareCircleStatus.failed;
+    _careCircleError = message;
     notifyListeners();
   }
 

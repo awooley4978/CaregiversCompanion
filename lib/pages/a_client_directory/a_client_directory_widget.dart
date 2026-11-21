@@ -1,4 +1,5 @@
 import '/backend/backend.dart';
+import '/backend/auth/auth_service.dart';
 import '/backend/org/org_service.dart';
 import '/components/client_card/client_card_widget.dart';
 import '/components/nav_menu_directory/nav_menu_directory_widget.dart';
@@ -71,6 +72,158 @@ class _AClientDirectoryWidgetState extends State<AClientDirectoryWidget> {
     final compactInitials =
         record.initials.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
     return compactInitials.contains(compactQuery);
+  }
+
+  // -------------------------------------------------------------------
+  // Care-circle loading / error / retry (owner decision 2026-11-21).
+  //
+  // The directory is the landing route, so it can be built before the signed-in
+  // user's care circle is known. It used to render that — and a failed
+  // resolution — as an empty list, which reads as "my loved one's information
+  // disappeared". The four display states are:
+  //
+  //   resolving      -> spinner + "Loading your care circle…"
+  //   failed         -> "We could not load your care circle." + Retry
+  //   ready, empty   -> the genuine empty line (only after a real resolution)
+  //   ready, filled  -> the existing recipient list
+  //
+  // The status itself lives in FFAppState and is set by auth_service.dart.
+  // -------------------------------------------------------------------
+
+  /// True while the care circle has not resolved yet: provisioning is in
+  /// flight, or it has not started and the group context is still unknown.
+  bool _circleResolving() {
+    final appState = FFAppState();
+    return switch (appState.careCircleStatus) {
+      CareCircleStatus.loading => true,
+      // Provisioning has not started (the auth listener has not run). The
+      // circle can only be read once the group context is known; until then
+      // the page is still resolving.
+      CareCircleStatus.idle => appState.activeGroupId == null,
+      CareCircleStatus.ready || CareCircleStatus.failed => false,
+    };
+  }
+
+  /// True when resolving the care circle failed (provisioning, or the
+  /// recipients query — the latter is handled inside the stream builder).
+  bool _circleFailed() =>
+      FFAppState().careCircleStatus == CareCircleStatus.failed;
+
+  /// Retry for BOTH failure kinds: re-runs the care-circle provisioning (which
+  /// sets the status again) and rebuilds the page, which re-creates the
+  /// recipients stream — so a failed query is retried too.
+  Future<void> _retryCareCircle() async {
+    FFAppState().setCareCircleLoading();
+    await retryCareCircleProvisioning();
+    if (mounted) {
+      safeSetState(() {});
+    }
+  }
+
+  /// The spinner shown while the care circle resolves. Never an empty list.
+  Widget _careCircleLoading() {
+    final theme = FlutterFlowTheme.of(context);
+    return Padding(
+      padding: EdgeInsetsDirectional.fromSTEB(0.0, 8.0, 0.0, 16.0),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          SizedBox(
+            width: 50.0,
+            height: 50.0,
+            child: CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(theme.primary),
+            ),
+          ),
+          Padding(
+            padding: EdgeInsetsDirectional.fromSTEB(0.0, 12.0, 0.0, 0.0),
+            child: Text(
+              'Loading your care circle…',
+              textAlign: TextAlign.center,
+              style: theme.bodyMedium,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The failure state: what went wrong plus a Retry button. Never an empty
+  /// list, never a silent blank.
+  Widget _careCircleError(String? message) {
+    final theme = FlutterFlowTheme.of(context);
+    final detail = (message ?? '').trim();
+    return Padding(
+      padding: EdgeInsetsDirectional.fromSTEB(0.0, 8.0, 0.0, 16.0),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Text(
+            'We could not load your care circle.',
+            textAlign: TextAlign.center,
+            style: theme.titleSmall,
+          ),
+          Padding(
+            padding: EdgeInsetsDirectional.fromSTEB(0.0, 4.0, 0.0, 0.0),
+            child: Text(
+              detail.isNotEmpty
+                  ? detail
+                  : 'Please check your connection and try again.',
+              textAlign: TextAlign.center,
+              style: theme.bodySmall,
+            ),
+          ),
+          Padding(
+            padding: EdgeInsetsDirectional.fromSTEB(0.0, 12.0, 0.0, 0.0),
+            child: FFButtonWidget(
+              onPressed: () async {
+                await _retryCareCircle();
+              },
+              text: 'Retry',
+              options: FFButtonOptions(
+                height: 40.0,
+                padding: EdgeInsetsDirectional.fromSTEB(24.0, 0.0, 24.0, 0.0),
+                iconPadding:
+                    EdgeInsetsDirectional.fromSTEB(0.0, 0.0, 0.0, 0.0),
+                color: theme.primary,
+                textStyle: theme.titleSmall.override(
+                  font: GoogleFonts.dmSans(
+                    fontWeight: theme.titleSmall.fontWeight,
+                    fontStyle: theme.titleSmall.fontStyle,
+                  ),
+                  color: theme.onPrimary,
+                  letterSpacing: 0.0,
+                  fontWeight: theme.titleSmall.fontWeight,
+                  fontStyle: theme.titleSmall.fontStyle,
+                ),
+                elevation: 0.0,
+                borderSide: BorderSide(
+                  color: Colors.transparent,
+                  width: 1.0,
+                ),
+                borderRadius: BorderRadius.circular(24.0),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The genuine empty circle: reachable only after a successful resolution.
+  Widget _careCircleEmpty() {
+    return Padding(
+      padding: EdgeInsetsDirectional.fromSTEB(0.0, 8.0, 0.0, 16.0),
+      child: Text(
+        'No care recipients in your care circle yet.',
+        textAlign: TextAlign.center,
+        style: FlutterFlowTheme.of(context).bodyMedium,
+      ),
+    );
   }
 
   @override
@@ -347,34 +500,30 @@ class _AClientDirectoryWidgetState extends State<AClientDirectoryWidget> {
                                 ),
                               ),
                             ),
+                            // Owner decision 2026-11-21: an empty directory may
+                            // only ever mean "the care circle really is
+                            // empty". While the circle resolves show the
+                            // spinner, and on failure show the error + Retry —
+                            // the stream alone cannot tell those apart from a
+                            // genuinely empty circle.
+                            if (_circleResolving())
+                              _careCircleLoading()
+                            else if (_circleFailed())
+                              _careCircleError(FFAppState().careCircleError)
+                            else
                             StreamBuilder<List<CareRecipientsRecord>>(
                               stream: careRecipientsForActiveGroup(),
                               builder: (context, snapshot) {
                                 // Customize what your widget looks like when it's loading.
                                   if (snapshot.hasError) {
-                                    return Padding(
-                                      padding: EdgeInsets.all(12.0),
-                                      child: Text(
-                                        'Error loading care recipients: '
-                                        '${snapshot.error}',
-                                        style: FlutterFlowTheme.of(context)
-                                            .bodyMedium,
-                                      ),
-                                    );
+                                    // The recipients query itself failed (rules
+                                    // denial, network): never an empty list.
+                                    return _careCircleError(
+                                        'Please check your connection and try '
+                                        'again.');
                                   }
                                 if (!snapshot.hasData) {
-                                  return Center(
-                                    child: SizedBox(
-                                      width: 50.0,
-                                      height: 50.0,
-                                      child: CircularProgressIndicator(
-                                        valueColor:
-                                            AlwaysStoppedAnimation<Color>(
-                                          FlutterFlowTheme.of(context).primary,
-                                        ),
-                                      ),
-                                    ),
-                                  );
+                                  return _careCircleLoading();
                                 }
                                 List<CareRecipientsRecord>
                                     listViewCareRecipientsRecordList =
@@ -403,6 +552,12 @@ class _AClientDirectoryWidgetState extends State<AClientDirectoryWidget> {
                                           FlutterFlowTheme.of(context).bodyMedium,
                                     ),
                                   );
+                                }
+
+                                // A resolved care circle that genuinely has no
+                                // recipients (no search term is narrowing it).
+                                if (filteredRecipients.isEmpty) {
+                                  return _careCircleEmpty();
                                 }
 
                                 return ListView.separated(

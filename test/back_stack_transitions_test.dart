@@ -36,6 +36,10 @@ void main() {
   setUp(() {
     FFAppState.reset();
     fakeFirestore.clear();
+    // These are navigation tests, not care-circle tests: mark the circle
+    // resolved so the Client Directory renders its content instead of the
+    // "resolving" spinner (owner decision 2026-11-21), which never settles.
+    FFAppState().setCareCircleReady();
   });
 
   /// Host page first, then the two REAL originating pages, then labelled stubs

@@ -20,6 +20,7 @@ import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart' show FirebaseException;
 import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:google_sign_in/google_sign_in.dart';
@@ -61,16 +62,71 @@ StreamSubscription<User?> attachAuthStateListener(
 /// (phase 2), and per-user persisted-state load. Each step is idempotent;
 /// any failure is contained so the session itself never breaks.
 Future<void> _onSignedIn(User user) async {
+  // Care-circle resolution first: it publishes loading -> ready/failed onto
+  // FFAppState, which the Client Directory renders (owner decision
+  // 2026-11-21 — never an empty directory while resolving or after a failure).
+  await _resolveCareCircle(user);
+  try {
+    await acceptInvitesForUser(user);
+    await FFAppState().initializePersistedStateForUser(user.uid);
+  } catch (_) {
+    // Never fail the session because of an invite/state error; both steps are
+    // retried on the next sign-in.
+  }
+}
+
+/// Resolves the signed-in user's care circle and mirrors the outcome onto
+/// [FFAppState]'s care-circle status: `loading` before the provisioning calls,
+/// `ready` once `activeGroupId` is assigned, `failed` (with the message) when
+/// provisioning throws.
+///
+/// Never throws: a provisioning failure must not break the session, so it is
+/// reported to the Client Directory instead of being swallowed silently.
+Future<void> _resolveCareCircle(User user) async {
+  FFAppState().setCareCircleLoading();
   try {
     await ensureUserProfile(user);
     final orgId = await ensureOrgMembership(user);
     FFAppState().activeGroupId = orgId;
-    await acceptInvitesForUser(user);
-    await FFAppState().initializePersistedStateForUser(user.uid);
-  } catch (_) {
-    // Never fail the session because of a provisioning/state error; all
-    // steps are retried on the next sign-in.
+    FFAppState().setCareCircleReady();
+  } catch (error) {
+    FFAppState().setCareCircleFailed(careCircleErrorMessage(error));
   }
+}
+
+/// Public retry entry point for the Client Directory's Retry button: re-runs
+/// the care-circle provisioning for the currently signed-in user and sets the
+/// status again (loading -> ready, or failed with the message).
+///
+/// The page rebuilds from that [FFAppState] notification, which also
+/// re-creates the recipients stream — so a Retry after a failed query (rules
+/// denial, network error) re-reads the circle as well.
+Future<void> retryCareCircleProvisioning() async {
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) {
+    FFAppState().setCareCircleFailed(
+      'You are not signed in. Sign in again to load your care circle.',
+    );
+    return;
+  }
+  await _resolveCareCircle(user);
+}
+
+/// The caregiver-facing line the Client Directory shows when the care circle
+/// could not be resolved. Human-readable: the raw error goes to the caller's
+/// own logging, not to the screen.
+String careCircleErrorMessage(Object error) {
+  if (error is OrgAccessDeniedException) {
+    return error.message;
+  }
+  if (error is FirebaseException) {
+    final message = (error.message ?? '').trim();
+    if (message.isNotEmpty) {
+      return message;
+    }
+    return 'We could not reach your care circle (${error.code}).';
+  }
+  return 'Something went wrong while loading your care circle.';
 }
 
 /// Auto-provisions the `users/{uid}` profile document on first successful
