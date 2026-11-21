@@ -22,6 +22,7 @@ import 'package:caregivers_companion/pages/b_care_profile_setup/b_care_profile_s
 import 'package:caregivers_companion/pages/group/household_widget.dart';
 import 'package:caregivers_companion/pages/h_weekly_summary_report/h_weekly_summary_report_widget.dart';
 import 'package:caregivers_companion/pages/settings_account/settings_account_widget.dart';
+import 'package:provider/provider.dart';
 
 import 'firebase_test_setup.dart';
 
@@ -80,7 +81,12 @@ void main() {
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
     final router = buildRouter();
-    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    await tester.pumpWidget(
+      ChangeNotifierProvider<FFAppState>.value(
+        value: FFAppState(),
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
     await tester.pumpAndSettle();
     return router;
   }
