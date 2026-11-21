@@ -46,7 +46,7 @@ void main() {
         ));
   }
 
-  Future<void> pumpDirectory(WidgetTester tester) async {
+  Future<void> pumpDirectory(WidgetTester tester, {bool settle = true}) async {
     tester.view.physicalSize = const Size(1200, 2400);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -58,7 +58,11 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    if (settle) {
+      await tester.pumpAndSettle();
+    } else {
+      await tester.pump();
+    }
   }
 
   /// Types into the search box and lets the debounce fire.
@@ -136,7 +140,10 @@ void main() {
     await seedRecipient('mom', 'Margaret Ellis', 'ME');
 
     FFAppState().activeGroupId = null;
-    await pumpDirectory(tester);
+    // The group context is unknown, so the page is in its "resolving" state
+    // (owner decision 2026-11-21): pumped frame by frame, since a progress
+    // indicator never settles.
+    await pumpDirectory(tester, settle: false);
     expect(find.text('Margaret Ellis'), findsNothing);
 
     FFAppState().activeGroupId = orgId;

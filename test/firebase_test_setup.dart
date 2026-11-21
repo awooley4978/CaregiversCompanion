@@ -242,9 +242,10 @@ class MemoryFirestorePlatform extends FirebaseFirestorePlatform {
   /// Test helper: let writes succeed again.
   void clearWriteError() => writeError = null;
 
-  /// Test helper: when set, every QUERY read throws this error — the stand-in
-  /// for a Firestore rules denial or a missing composite index, so a screen's
-  /// honest "could not load" state can be exercised. Null = reads succeed.
+  /// Test helper: when set, every QUERY read (a one-shot get AND a live
+  /// snapshots() stream) throws this error — the stand-in for a Firestore
+  /// rules denial or a missing composite index, so a screen's honest "could
+  /// not load" state can be exercised. Null = reads succeed.
   Object? queryError;
 
   /// Test helper: let query reads succeed again.
@@ -479,6 +480,10 @@ class _MemoryCollectionReference extends CollectionReferencePlatform {
     bool includeMetadataChanges = false,
     required ListenSource listenSource,
   }) {
+    final error = (firestore as MemoryFirestorePlatform).queryError;
+    if (error != null) {
+      return Stream<QuerySnapshotPlatform>.error(error);
+    }
     return Stream<QuerySnapshotPlatform>.value(
         _MemoryQuery.from(this)._runSync());
   }
@@ -560,6 +565,10 @@ class _MemoryQuery extends QueryPlatform {
     bool includeMetadataChanges = false,
     required ListenSource listenSource,
   }) {
+    final error = _store.queryError;
+    if (error != null) {
+      return Stream<QuerySnapshotPlatform>.error(error);
+    }
     return Stream<QuerySnapshotPlatform>.value(_runSync());
   }
 
