@@ -1,5 +1,6 @@
 import '/backend/backend.dart';
 import '/backend/org/org_service.dart';
+import '/backend/vitals/vitals_entry.dart';
 import '/components/add_meal_widget.dart';
 import '/components/button/button_widget.dart';
 import '/components/dashboard_notes_form/dashboard_notes_form_widget.dart';
@@ -407,6 +408,45 @@ Future<void> openLogSymptomSheet(
     },
   );
 }
+/// The four measurements the Morning Vitals chips show, in chip order.
+@visibleForTesting
+const List<VitalMeasurement> morningVitalMeasurements = [
+  VitalMeasurement.heartRate,
+  VitalMeasurement.bloodPressure,
+  VitalMeasurement.bloodGlucose,
+  VitalMeasurement.weight,
+];
+
+/// The recipient's REAL latest reading for each Morning Vitals chip.
+///
+/// ONE recipient-scoped `vitalLogs` read: `careRecipientRef` == the recipient,
+/// `logDateTime` descending — the same query the Vitals & Health screen issues,
+/// which is what the recipient-scoped LIST rule requires (an unconstrained
+/// list is denied). Each measurement takes its OWN newest record, so blood
+/// pressure and weight can legitimately carry different dates.
+///
+/// A measurement with no recorded value maps to [vitalChipNoReading]; there is
+/// no fallback number anywhere in this path. A failed read throws, so the
+/// caller can tell "couldn't load" apart from "nothing recorded yet".
+@visibleForTesting
+Future<Map<VitalMeasurement, VitalsChipReading>> loadMorningVitalReadings(
+  DocumentReference recipientRef,
+) async {
+  final logs = sortVitalsNewestFirst(
+    await queryVitalLogsRecordOnce(
+      queryBuilder: (query) => query
+          .where('careRecipientRef', isEqualTo: recipientRef)
+          .orderBy('logDateTime', descending: true),
+      limit: 50,
+    ),
+  );
+  return {
+    for (final measurement in morningVitalMeasurements)
+      measurement: latestVitalChipReading(logs, measurement) ??
+          const VitalsChipReading(value: vitalChipNoReading),
+  };
+}
+
 class CDailyDashboardWidget extends StatefulWidget {
   const CDailyDashboardWidget({
     super.key,
@@ -436,10 +476,102 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
   /// the sheet therefore wins here for the life of the page.
   DocumentReference? _overrideRecipientRef;
 
+  /// The Morning Vitals chips' real readings for the recipient the section is
+  /// showing, keyed by measurement. Null until a read has succeeded.
+  Map<VitalMeasurement, VitalsChipReading>? _vitalsReadings;
+
+  /// True while the recipient's `vitalLogs` read is in flight. The chips show
+  /// neither a number nor "No reading yet" during this window.
+  bool _vitalsLoading = false;
+
+  /// True when the read itself failed — the chips are replaced by
+  /// [vitalChipLoadError] rather than implying the recipient has no readings.
+  bool _vitalsFailed = false;
+
+  String? _vitalsLoadedRecipientPath;
+  int _vitalsLoadToken = 0;
+
+  /// The chip's value: the recipient's real latest reading, "No reading yet"
+  /// only after a successful read found none, and '…' while it is loading.
+  String _vitalsChipValue(VitalMeasurement measurement) {
+    if (_vitalsLoading || _vitalsReadings == null) {
+      return '…';
+    }
+    return _vitalsReadings![measurement]?.value ?? vitalChipNoReading;
+  }
+
+  /// The date of the reading [measurement] is showing, if it has one.
+  String? _vitalsChipDate(VitalMeasurement measurement) =>
+      _vitalsLoading ? null : _vitalsReadings?[measurement]?.dateText;
+
+  /// Loads the chips' readings for the currently selected recipient.
+  Future<void> _loadVitals() async {
+    final token = ++_vitalsLoadToken;
+    final ref = FFAppState().selectedCareRecipient;
+
+    if (ref == null) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _vitalsReadings = null;
+        _vitalsLoading = false;
+        _vitalsFailed = false;
+        _vitalsLoadedRecipientPath = null;
+      });
+      return;
+    }
+
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _vitalsReadings = null;
+      _vitalsLoading = true;
+      _vitalsFailed = false;
+    });
+
+    try {
+      final readings = await loadMorningVitalReadings(ref);
+      if (!mounted || token != _vitalsLoadToken) {
+        return;
+      }
+      setState(() {
+        _vitalsReadings = readings;
+        _vitalsLoadedRecipientPath = ref.path;
+        _vitalsLoading = false;
+      });
+    } catch (_) {
+      if (!mounted || token != _vitalsLoadToken) {
+        return;
+      }
+      setState(() {
+        _vitalsReadings = null;
+        _vitalsLoading = false;
+        _vitalsFailed = true;
+      });
+    }
+  }
+
+  /// The recipient changed while this dashboard is open: the chips must not
+  /// keep showing the previous recipient's readings.
+  void _onAppStateChanged() {
+    if (!mounted) {
+      return;
+    }
+    if (FFAppState().selectedCareRecipient?.path == _vitalsLoadedRecipientPath) {
+      return;
+    }
+    _loadVitals();
+  }
+
   @override
   void initState() {
     super.initState();
     _model = createModel(context, () => CDailyDashboardModel());
+
+    FFAppState().addListener(_onAppStateChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadVitals());
 
     // On page load action.
     SchedulerBinding.instance.addPostFrameCallback((_) async {
@@ -461,6 +593,7 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
 
   @override
   void dispose() {
+    FFAppState().removeListener(_onAppStateChanged);
     _model.dispose();
 
     super.dispose();
@@ -989,6 +1122,41 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                   final containerCareRecipientsRecord =
                                       snapshot.data!;
 
+                                  // The vitals read itself failed: say so,
+                                  // rather than showing four "No reading yet"
+                                  // chips that would claim nothing is recorded.
+                                  if (_vitalsFailed) {
+                                    return Text(
+                                      vitalChipLoadError,
+                                      style: FlutterFlowTheme.of(context)
+                                          .bodySmall
+                                          .override(
+                                            font: GoogleFonts.nunito(
+                                              fontWeight:
+                                                  FlutterFlowTheme.of(context)
+                                                      .bodySmall
+                                                      .fontWeight,
+                                              fontStyle:
+                                                  FlutterFlowTheme.of(context)
+                                                      .bodySmall
+                                                      .fontStyle,
+                                            ),
+                                            color: FlutterFlowTheme.of(context)
+                                                .secondaryText,
+                                            letterSpacing: 0.0,
+                                            fontWeight:
+                                                FlutterFlowTheme.of(context)
+                                                    .bodySmall
+                                                    .fontWeight,
+                                            fontStyle:
+                                                FlutterFlowTheme.of(context)
+                                                    .bodySmall
+                                                    .fontStyle,
+                                            lineHeight: 1.4,
+                                          ),
+                                    );
+                                  }
+
                                   return Container(
                                     decoration: BoxDecoration(),
                                     child: SingleChildScrollView(
@@ -1021,7 +1189,12 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                                       size: 16.0,
                                                     ),
                                                     label: 'Heart Rate',
-                                                    value: '72 bpm',
+                                                    value: _vitalsChipValue(
+                                                        VitalMeasurement
+                                                            .heartRate),
+                                                    date: _vitalsChipDate(
+                                                        VitalMeasurement
+                                                            .heartRate),
                                                   ),
                                                 ),
                                               ),
@@ -1042,7 +1215,12 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                                   size: 16.0,
                                                 ),
                                                 label: 'Blood Pressure',
-                                                value: '118/76',
+                                                value: _vitalsChipValue(
+                                                    VitalMeasurement
+                                                        .bloodPressure),
+                                                date: _vitalsChipDate(
+                                                    VitalMeasurement
+                                                        .bloodPressure),
                                               ),
                                             ),
                                           if (widget!.careRecipients
@@ -1061,7 +1239,12 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                                   size: 16.0,
                                                 ),
                                                 label: 'Glucose',
-                                                value: '94 mg/dL',
+                                                value: _vitalsChipValue(
+                                                    VitalMeasurement
+                                                        .bloodGlucose),
+                                                date: _vitalsChipDate(
+                                                    VitalMeasurement
+                                                        .bloodGlucose),
                                               ),
                                             ),
                                           if (widget!.careRecipients
@@ -1080,7 +1263,10 @@ class _CDailyDashboardWidgetState extends State<CDailyDashboardWidget> {
                                                   size: 16.0,
                                                 ),
                                                 label: 'Weight',
-                                                value: '142 lbs',
+                                                value: _vitalsChipValue(
+                                                    VitalMeasurement.weight),
+                                                date: _vitalsChipDate(
+                                                    VitalMeasurement.weight),
                                               ),
                                             ),
                                         ].divide(SizedBox(width: 5.0)),

@@ -225,6 +225,53 @@ String formatVitalDateTime(DateTime at) {
       '${DateFormat('h:mm a').format(local)}';
 }
 
+/// The short date line under a Morning Vitals chip, e.g. 'Nov 21, 9:15 AM' —
+/// the record's own `logDateTime`, device-local like every other vitals time.
+String formatVitalChipDate(DateTime at) =>
+    DateFormat('MMM d, h:mm a').format(at.toLocal());
+
+/// Shown in a Morning Vitals chip for a measurement the recipient has no
+/// recorded value for. Never a placeholder number.
+const String vitalChipNoReading = 'No reading yet';
+
+/// Shown in place of the Morning Vitals chips when the read itself failed —
+/// distinct from [vitalChipNoReading], which must only appear after a read
+/// actually succeeded and found nothing.
+const String vitalChipLoadError = "Couldn't load vitals";
+
+/// One Morning Vitals chip: the value text and the date of the SAME record.
+class VitalsChipReading {
+  const VitalsChipReading({required this.value, this.dateText});
+
+  final String value;
+
+  /// Short date of the reading, or null when the record carries no time.
+  final String? dateText;
+}
+
+/// The latest reading of [measurement] across [newestFirst] — its value and
+/// its own date. Null when no record holds a value for that measurement.
+///
+/// Each measurement has its own newest record: blood pressure and weight
+/// legitimately come from different logs taken at different times.
+VitalsChipReading? latestVitalChipReading(
+  List<VitalLogsRecord> newestFirst,
+  VitalMeasurement measurement,
+) {
+  for (final log in newestFirst) {
+    final value = vitalValueText(log, measurement);
+    if (value == null) {
+      continue;
+    }
+    final at = log.logDateTime;
+    return VitalsChipReading(
+      value: value,
+      dateText: at == null ? null : formatVitalChipDate(at),
+    );
+  }
+  return null;
+}
+
 /// The header's date line, e.g. 'Monday, Oct 23'.
 String formatVitalsToday(DateTime now) =>
     DateFormat('EEEE, MMM d').format(now.toLocal());
