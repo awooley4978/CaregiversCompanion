@@ -7,10 +7,12 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '/backend/backend.dart';
+import '/backend/water/water_history.dart';
 import '/backend/water/water_intake.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/flutter_flow_widgets.dart';
+import '/pages/water_history/water_history_widget.dart';
 
 /// Upper bound on the per-recipient water read.
 ///
@@ -59,6 +61,10 @@ Stream<List<WaterLogsRecord>> waterLogsForRecipient({
 ///    each filled glass is 8 fl oz of intake actually logged today, capped at
 ///    the nine icons the design draws — the glasses are not a target and the
 ///    card carries no goal language;
+///  * a "History" link opens the recipient's READ-ONLY water history (owner
+///    direction 2026-11-22) — intake amounts, local times, authors, corrections
+///    and per-day totals, reaching previous days by scrolling. That screen
+///    writes nothing;
 ///  * a failed read shows an honest error state, never a fabricated zero.
 class DailyWaterCardWidget extends StatefulWidget {
   const DailyWaterCardWidget({
@@ -329,6 +335,17 @@ class _DailyWaterCardWidgetState extends State<DailyWaterCardWidget> {
     await _addWater(amount, isQuickAdd: false);
   }
 
+  /// Opens the recipient's read-only water history (owner direction
+  /// 2026-11-22). The screen writes nothing: it is a bounded,
+  /// recipient-scoped read of the records this card already created.
+  void _openHistory() {
+    final ref = widget.recipientRef;
+    context.pushNamed(
+      WaterHistoryWidget.routeName,
+      queryParameters: ref == null ? const {} : {'careRecipientId': ref.id},
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = FlutterFlowTheme.of(context);
@@ -552,6 +569,20 @@ class _DailyWaterCardWidgetState extends State<DailyWaterCardWidget> {
                                 onTap: canAdd ? _openCustomAmountSheet : null,
                                 child: Text(
                                   'Custom amount',
+                                  style: _smallStyle(theme).override(
+                                    decoration: TextDecoration.underline,
+                                  ),
+                                ),
+                              ),
+                              SizedBox(width: 10.0),
+                              // The read-only history screen (owner direction
+                              // 2026-11-22). It stays available even while a
+                              // write is in flight — it never writes.
+                              InkWell(
+                                key: const ValueKey('waterHistoryLink'),
+                                onTap: _openHistory,
+                                child: Text(
+                                  waterHistoryLink,
                                   style: _smallStyle(theme).override(
                                     decoration: TextDecoration.underline,
                                   ),

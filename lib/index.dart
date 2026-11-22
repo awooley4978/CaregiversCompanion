@@ -22,3 +22,4 @@ export '/pages/auth/login_widget.dart' show AuthLoginWidget;
 export '/pages/auth/signup_widget.dart' show AuthSignupWidget;
 export '/pages/group/household_widget.dart' show HouseholdWidget;
 export '/calendar_page/calendar_page_widget.dart' show CalendarPageWidget;
+export '/pages/water_history/water_history_widget.dart' show WaterHistoryWidget;
