@@ -11,7 +11,12 @@
 //    (the glasses are not a goal);
 //  * tapping glass N writes exactly ONE record holding the difference up to N
 //    (tap 4 from empty → 32 fl oz; tap 4 with 8 fl oz logged → 24 fl oz), so
-//    Undo removes exactly that tap; a filled glass writes nothing at all;
+//    Undo removes exactly that tap; the glass already exactly at the total
+//    writes nothing at all;
+//  * tapping a glass BELOW today's total (owner decision 2026-11-22) writes ONE
+//    negative adjustment document and lowers the total: never an edit or a
+//    delete of anything that already existed, never below another caregiver's
+//    own intake, and never below zero — see the "tap to lower" group;
 //  * the custom-amount sheet writes the entered amount, and invalid input
 //    writes nothing and names the field and its range;
 //  * Undo deletes exactly the record that action created, and a refused delete
@@ -88,6 +93,36 @@ void main() {
       .entries
       .where((entry) => entry.key.startsWith('waterLogs/'))
       .toList();
+
+  /// Seeds one intake by ANOTHER caregiver and returns the raw stored map, so a
+  /// test can prove it was never touched.
+  Future<Map<String, dynamic>> seedOtherCaregiverIntake({
+    required String uid,
+    required double amountFlOz,
+  }) async {
+    final ref = WaterLogsRecord.collection.doc();
+    await ref.set(
+      createWaterLogsRecordData(
+        careRecipientRef: recipientRef(),
+        orgId: 'org_test',
+        loggedByUid: uid,
+        intakeAt: DateTime.now(),
+        amount: amountFlOz,
+        unit: waterUnitFlOz,
+        amountFlOz: amountFlOz,
+      ),
+    );
+    return Map<String, dynamic>.from(fakeFirestore.docs[ref.path]!);
+  }
+
+  /// The raw stored map of the record written by [uid] holding [amountFlOz].
+  Map<String, dynamic> rawRecordFor(String uid, double amountFlOz) =>
+      Map<String, dynamic>.from(
+        fakeFirestore.docs.values.singleWhere(
+          (doc) =>
+              doc['loggedByUid'] == uid && doc['amountFlOz'] == amountFlOz,
+        ),
+      );
 
   /// Reads the saved entries through the app-facing path (the raw stored map
   /// holds platform refs, which must not be parsed into records).
@@ -412,20 +447,23 @@ void main() {
       expect(filledGlasses(tester), 1);
     });
 
-    testWidgets('tapping an already filled glass writes nothing',
+    testWidgets('tapping the glass already exactly at the total writes nothing',
         (tester) async {
       await seedRecipient();
       await seedIntake(at: DateTime.now(), amountFlOz: 24);
       await pumpCard(tester);
       expect(filledGlasses(tester), 3);
 
-      await tester.tap(find.byKey(const ValueKey('waterGlass0')));
+      // Drop 3 is exactly at 24 fl oz: nothing to add and nothing to correct.
+      await tester.tap(find.byKey(const ValueKey('waterGlass2')));
       await tester.pumpAndSettle();
 
       // No write, no snackbar, nothing removed to "empty" the glass.
       expect(waterDocs().length, 1);
       expect(find.text('24 fl oz'), findsOneWidget);
       expect(find.textContaining('fl oz added'), findsNothing);
+      expect(find.textContaining('fl oz removed'), findsNothing);
+      expect(find.textContaining('Nothing to reduce'), findsNothing);
     });
 
     testWidgets('the ~5 s Undo removes exactly the record that was added',
@@ -533,6 +571,338 @@ void main() {
 
       expect(waterDocs(), isEmpty);
       expect(find.byKey(const ValueKey('waterAmountField')), findsNothing);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Tapping a drop BELOW today's total (owner decision 2026-11-22,
+  // water-tap-to-empty-spec.md). A correction is ONE new adjustment document;
+  // nothing that already exists is edited or deleted, and one caregiver's tap
+  // can never eat into another caregiver's intake.
+  // ---------------------------------------------------------------------------
+  group('tap outcomes (adjustment entries)', () {
+    final now = DateTime(2026, 11, 22, 15, 0);
+
+    WaterLogsRecord entry({
+      required double flOz,
+      required String uid,
+      bool adjustment = false,
+      double? targetFlOz,
+    }) =>
+        WaterLogsRecord.getDocumentFromData(
+          createWaterLogsRecordData(
+            careRecipientRef: null,
+            intakeAt: now,
+            amount: flOz.abs(),
+            unit: waterUnitFlOz,
+            amountFlOz: flOz,
+            loggedByUid: uid,
+            adjustment: adjustment ? true : null,
+            targetFlOz: targetFlOz,
+          ),
+          recipientRef(),
+        );
+
+    WaterTapOutcome tap(
+      int glass,
+      List<WaterLogsRecord> logs, {
+      String uid = 'uid-1',
+    }) =>
+        waterTapOutcome(
+          glassNumber: glass,
+          logs: logs,
+          now: now,
+          uid: uid,
+        );
+
+    test('above the total fills, exactly at it does nothing, below corrects', () {
+      final logs = [entry(flOz: 24, uid: 'uid-1')];
+
+      final above = tap(4, logs); // 32 > 24
+      expect(above.kind, WaterTapKind.fill);
+      expect(above.amountFlOz, 8);
+      expect(above.newTotalFlOz, 32);
+
+      final at = tap(3, logs); // 24 == 24
+      expect(at.kind, WaterTapKind.noOp);
+      expect(at.writes, isFalse);
+      expect(at.amountFlOz, 0);
+      expect(at.message, isNull);
+
+      final below = tap(2, logs); // 16 < 24
+      expect(below.kind, WaterTapKind.correction);
+      expect(below.amountFlOz, 8);
+      expect(below.newTotalFlOz, 16);
+      expect(below.targetFlOz, 16);
+      expect(below.clamped, isFalse);
+      expect(below.message, '8 fl oz removed');
+    });
+
+    test('a correction removes the difference when the caller has it to give',
+        () {
+      // 24 of the caller's own + 24 from another caregiver = 48.
+      final logs = [
+        entry(flOz: 24, uid: 'uid-1'),
+        entry(flOz: 24, uid: 'uid-2'),
+      ];
+      final outcome = tap(4, logs);
+      expect(outcome.kind, WaterTapKind.correction);
+      expect(outcome.amountFlOz, 16); // 48 - 32
+      expect(outcome.newTotalFlOz, 32);
+      expect(outcome.clamped, isFalse);
+      expect(outcome.message, '16 fl oz removed');
+    });
+
+    test('a correction stops at the caller\'s own intake and says why', () {
+      // Only 8 of the caller's own; 40 from another caregiver.
+      final logs = [
+        entry(flOz: 8, uid: 'uid-1'),
+        entry(flOz: 40, uid: 'uid-2'),
+      ];
+      final outcome = tap(1, logs); // wants 48 - 8 = 40, may give back 8
+      expect(outcome.kind, WaterTapKind.correction);
+      expect(outcome.amountFlOz, 8);
+      expect(outcome.clamped, isTrue);
+      // The total lands on the other caregiver's 40, never below it.
+      expect(outcome.newTotalFlOz, 40);
+      expect(outcome.message, waterReducedToMessage(40));
+      expect(
+        outcome.message,
+        'Reduced to 40 fl oz — the rest was logged by another caregiver.',
+      );
+    });
+
+    test('with nothing of their own to give back nothing is written', () {
+      final logs = [entry(flOz: 48, uid: 'uid-2')];
+      final outcome = tap(1, logs);
+      expect(outcome.kind, WaterTapKind.noOp);
+      expect(outcome.writes, isFalse);
+      expect(outcome.amountFlOz, 0);
+      expect(outcome.newTotalFlOz, 48);
+      expect(outcome.message, waterNothingToReduce);
+    });
+
+    test('repeated corrections stay consistent and stop at the caller\'s net',
+        () {
+      final logs = [
+        entry(flOz: 24, uid: 'uid-1'),
+        entry(flOz: 24, uid: 'uid-2'),
+      ];
+
+      final first = tap(4, logs); // 48 → 32
+      expect(first.kind, WaterTapKind.correction);
+      expect(first.amountFlOz, 16);
+      expect(first.newTotalFlOz, 32);
+      logs.add(entry(flOz: -16, uid: 'uid-1', adjustment: true, targetFlOz: 32));
+
+      final second = tap(3, logs); // 32 → 24, exactly the other caregiver's 24
+      expect(second.kind, WaterTapKind.correction);
+      expect(second.amountFlOz, 8);
+      expect(second.newTotalFlOz, 24);
+      expect(second.clamped, isFalse);
+      logs.add(entry(flOz: -8, uid: 'uid-1', adjustment: true, targetFlOz: 24));
+
+      // All of the caller's own water is given back: the total stays on the
+      // other caregiver's 24 and the tap writes nothing.
+      final third = tap(1, logs);
+      expect(third.kind, WaterTapKind.noOp);
+      expect(third.writes, isFalse);
+      expect(third.message, waterNothingLeftToReduce);
+      expect(waterTotalFlOz(logs, now), 24);
+
+      // Filling still works after a correction.
+      expect(tap(4, logs).kind, WaterTapKind.fill);
+    });
+
+    test('no tap can push the total below zero or below another caregiver', () {
+      final days = <List<WaterLogsRecord>>[
+        [],
+        [entry(flOz: 8, uid: 'uid-2')],
+        [entry(flOz: 8, uid: 'uid-1')],
+        [entry(flOz: 8, uid: 'uid-1'), entry(flOz: 48, uid: 'uid-2')],
+        [
+          entry(flOz: 24, uid: 'uid-1'),
+          entry(flOz: 24, uid: 'uid-2'),
+          entry(flOz: -16, uid: 'uid-1', adjustment: true, targetFlOz: 32),
+        ],
+        // Defensive: adjustments already outweigh the intake of the caller.
+        [
+          entry(flOz: 8, uid: 'uid-2'),
+          entry(flOz: -24, uid: 'uid-1', adjustment: true, targetFlOz: 0),
+        ],
+        // Defensive: a day whose net total is already negative.
+        [
+          entry(flOz: 8, uid: 'uid-2'),
+          entry(flOz: -40, uid: 'uid-1', adjustment: true, targetFlOz: 0),
+        ],
+      ];
+
+      for (final logs in days) {
+        final othersTotal = logs
+            .where((log) => log.loggedByUid != 'uid-1')
+            .fold<double>(0, (sum, log) => sum + log.amountFlOz);
+        for (var glass = 1; glass <= waterGlassCount; glass++) {
+          final outcome = tap(glass, logs);
+          expect(outcome.newTotalFlOz, greaterThanOrEqualTo(0));
+          if (outcome.isCorrection) {
+            expect(outcome.amountFlOz, greaterThan(0));
+            expect(outcome.newTotalFlOz, greaterThanOrEqualTo(othersTotal));
+          }
+        }
+      }
+    });
+
+    test('an adjustment is distinguishable from intake', () {
+      final intake = entry(flOz: 24, uid: 'uid-1');
+      final adjustment =
+          entry(flOz: -16, uid: 'uid-1', adjustment: true, targetFlOz: 32);
+
+      expect(intake.adjustment, isFalse);
+      expect(intake.amountFlOz, 24);
+      expect(adjustment.adjustment, isTrue);
+      // The magnitude stays positive for the rules; the sign carries the effect.
+      expect(adjustment.amount, 16);
+      expect(adjustment.amountFlOz, -16);
+      expect(adjustment.targetFlOz, 32);
+
+      final logs = [intake, entry(flOz: 24, uid: 'uid-2'), adjustment];
+      // The card's total is the signed net; a report's intake counts intake only.
+      expect(waterTotalFlOz(logs, now), 32);
+      expect(waterIntakeOnlyFlOz(logs, now), 48);
+
+      // The wording contract for a history row / report line.
+      expect(
+        formatWaterAdjustment(adjustment.amountFlOz, adjustment.targetFlOz),
+        'Adjusted −16 fl oz (to 32 fl oz)',
+      );
+    });
+  });
+
+  group('tap to lower (adjustment entries)', () {
+    testWidgets('tapping a lower drop writes ONE adjustment, lowers the total',
+        (tester) async {
+      await seedRecipient();
+      // The caller logged 24 fl oz of their own; another caregiver logged 24.
+      await seedIntake(at: DateTime.now(), amountFlOz: 24);
+      final otherRaw =
+          await seedOtherCaregiverIntake(uid: 'uid-2', amountFlOz: 24);
+      await pumpCard(tester);
+      expect(find.text('48 fl oz'), findsOneWidget);
+      expect(filledGlasses(tester), 6);
+
+      await tester.tap(find.byKey(const ValueKey('waterGlass3'))); // drop 4
+      await tester.pumpAndSettle();
+
+      // ONE new document: the two intakes stay, nothing was removed.
+      expect(waterDocs().length, 3);
+      final saved = await savedWater();
+      expect(saved.where((record) => record.adjustment), hasLength(1));
+      expect(saved.where((record) => !record.adjustment), hasLength(2));
+
+      final adjustment = saved.singleWhere((record) => record.adjustment);
+      expect(adjustment.amountFlOz, -16);
+      expect(adjustment.amount, 16);
+      expect(adjustment.targetFlOz, 32);
+      expect(adjustment.loggedByUid, 'uid-1');
+      expect(adjustment.unit, waterUnitFlOz);
+      expect(adjustment.orgId, 'org_test');
+      expect(adjustment.careRecipientRef?.path, 'careRecipients/r1');
+      expect(adjustment.intakeAt, isNotNull);
+
+      // The total is the honest net figure; drops 1-4 are filled.
+      expect(find.text('32 fl oz'), findsOneWidget);
+      expect(filledGlasses(tester), 4);
+      expect(find.text('16 fl oz removed'), findsOneWidget);
+
+      // The other caregiver's record is byte-identical before and after.
+      expect(rawRecordFor('uid-2', 24), equals(otherRaw));
+      // And the caller's own earlier intake is untouched.
+      expect(rawRecordFor('uid-1', 24)['amountFlOz'], 24);
+    });
+
+    testWidgets('with none of their own intake the tap writes nothing, says so',
+        (tester) async {
+      await seedRecipient();
+      final otherRaw =
+          await seedOtherCaregiverIntake(uid: 'uid-2', amountFlOz: 48);
+      await pumpCard(tester);
+      expect(find.text('48 fl oz'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('waterGlass0'))); // drop 1
+      await tester.pumpAndSettle();
+
+      // No write, no Undo, and the honest reason — the other caregiver's 48
+      // fl oz is intact.
+      expect(waterDocs().length, 1);
+      expect(find.text(waterNothingToReduce), findsOneWidget);
+      expect(find.text('Undo'), findsNothing);
+      expect(find.text('48 fl oz'), findsOneWidget);
+      expect(filledGlasses(tester), 6);
+      expect(rawRecordFor('uid-2', 48), equals(otherRaw));
+    });
+
+    testWidgets('Undo deletes exactly the adjustment and restores the total',
+        (tester) async {
+      await seedRecipient();
+      await seedIntake(at: DateTime.now(), amountFlOz: 24);
+      final otherRaw =
+          await seedOtherCaregiverIntake(uid: 'uid-2', amountFlOz: 24);
+      await pumpCard(tester);
+
+      await tester.tap(find.byKey(const ValueKey('waterGlass3')));
+      await tester.pumpAndSettle();
+      expect(find.text('32 fl oz'), findsOneWidget);
+      expect(filledGlasses(tester), 4);
+
+      await tester.tap(find.text('Undo'));
+      await tester.pumpAndSettle();
+
+      // Only the adjustment is gone; both intakes are exactly as they were.
+      expect(waterDocs().length, 2);
+      expect(find.text('48 fl oz'), findsOneWidget);
+      expect(filledGlasses(tester), 6);
+      expect(rawRecordFor('uid-2', 24), equals(otherRaw));
+      expect(rawRecordFor('uid-1', 24)['amountFlOz'], 24);
+    });
+
+    testWidgets('a custom amount is unchanged and survives a later correction',
+        (tester) async {
+      await seedRecipient();
+      await seedOtherCaregiverIntake(uid: 'uid-2', amountFlOz: 24);
+      await pumpCard(tester);
+
+      // Custom amount: one positive intake record, its own snackbar, no Undo.
+      await tester.tap(find.byKey(const ValueKey('waterCustomAmount')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+          find.byKey(const ValueKey('waterAmountField')), '16');
+      await tester.tap(find.byKey(const ValueKey('waterAmountAdd')));
+      await tester.pumpAndSettle();
+
+      expect(waterDocs().length, 2);
+      final custom =
+          (await savedWater()).singleWhere((record) => record.amountFlOz == 16);
+      expect(custom.adjustment, isFalse);
+      expect(custom.amount, 16);
+      expect(custom.targetFlOz, 0);
+      expect(find.text('40 fl oz'), findsOneWidget);
+      expect(find.text('Undo'), findsNothing);
+      final customRaw = rawRecordFor('uid-1', 16);
+
+      // A later correction can only give back the caller's own 16, so the total
+      // stops on the other caregiver's 24 and the snackbar says why.
+      await tester.tap(find.byKey(const ValueKey('waterGlass1'))); // drop 2
+      await tester.pumpAndSettle();
+
+      expect(waterDocs().length, 3);
+      final adjustment = (await savedWater())
+          .singleWhere((record) => record.adjustment);
+      expect(adjustment.amountFlOz, -16);
+      expect(adjustment.targetFlOz, 16);
+      expect(find.text('24 fl oz'), findsOneWidget);
+      expect(find.text(waterReducedToMessage(24)), findsOneWidget);
+      // The custom entry itself is never edited by the correction.
+      expect(rawRecordFor('uid-1', 16), equals(customRaw));
     });
   });
 }

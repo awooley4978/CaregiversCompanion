@@ -11,6 +11,19 @@
 //  * D5 — "today" is the DEVICE-LOCAL day, computed in the app.
 //  * D6 — every entry is "now"; backdating is deferred.
 //
+// Owner decisions of 2026-11-22 (water-tap-to-empty-spec.md) that shape the
+// correction half of this file:
+//  * tapping a drop BELOW today's total writes ONE adjustment document whose
+//    `amountFlOz` is negative, so `sum(amountFlOz)` stays the honest net figure
+//    with no special-casing in any consumer;
+//  * a correction is capped at the caller's OWN positive intake today, so one
+//    caregiver's tap can never reduce another caregiver's legitimate intake,
+//    and the total can never go negative;
+//  * nothing existing is ever edited or deleted to reduce the total — an
+//    adjustment is a new record, and Undo deletes exactly that record;
+//  * `adjustment: true` keeps a correction distinguishable from intake, for a
+//    future history screen and for any report (see the wording contract below).
+//
 // The bounds below are input-sanity checks ONLY. They are never shown as a
 // health assessment and no clinical interpretation of an amount exists.
 import 'dart:math' as math;
@@ -46,6 +59,23 @@ const String waterSelectRecipient = 'Select a care recipient to track water.';
 
 /// Shown when an Undo could not remove the record it created.
 const String waterUndoKept = 'Could not undo — the entry was kept';
+
+/// Shown when a tap on a lower drop has nothing of the caller's own to give
+/// back, so nothing is written and no total moves.
+const String waterNothingToReduce =
+    "Nothing to reduce — all of today's water was logged by someone else.";
+
+/// Shown when the caller HAS logged water today but has already corrected all of
+/// it away, so there is still nothing of their own left to give back.
+const String waterNothingLeftToReduce =
+    "Nothing to reduce — you've already removed your own entries for today.";
+
+/// Shown when a correction had to stop short of the tapped drop because the
+/// rest of the intake belongs to another caregiver. [flOz] is the total the
+/// card now shows.
+String waterReducedToMessage(double flOz) =>
+    'Reduced to ${formatWaterFlOz(flOz)} — the rest was logged by another '
+    'caregiver.';
 
 /// True when [a] and [b] fall on the same day in the DEVICE's local timezone.
 ///
@@ -116,6 +146,204 @@ double waterAmountToAddForGlass(int glassNumber, double totalFlOz) {
   final difference = glassNumber * waterGlassFlOz - totalFlOz;
   return difference > 0 ? difference : 0;
 }
+
+/// Today's INTAKE only: the sum of the positive `amountFlOz` values logged on
+/// the device-local day containing [now].
+///
+/// Adjustments are excluded, so this is the honest "how much water was drunk"
+/// figure a report needs — the net figure ([waterTotalFlOz]) answers a
+/// different question. Nothing is ever presented as intake that is not intake.
+double waterIntakeOnlyFlOz(List<WaterLogsRecord> logs, DateTime now) {
+  var total = 0.0;
+  for (final log in waterLogsForLocalDay(logs, now)) {
+    if (log.amountFlOz > 0) {
+      total += log.amountFlOz;
+    }
+  }
+  return total;
+}
+
+/// The caller's OWN gross intake today: the sum of their positive `amountFlOz`
+/// values. Another caregiver's entries are never counted here, which is what
+/// stops one person's tap from reducing someone else's legitimate intake.
+double waterOwnLoggedFlOz(
+  List<WaterLogsRecord> logs,
+  DateTime now,
+  String uid,
+) {
+  if (uid.isEmpty) {
+    return 0;
+  }
+  var total = 0.0;
+  for (final log in waterLogsForLocalDay(logs, now)) {
+    if (log.loggedByUid == uid && log.amountFlOz > 0) {
+      total += log.amountFlOz;
+    }
+  }
+  return total;
+}
+
+/// The caller's own NET contribution today: their own entries plus their own
+/// corrections (which are negative).
+///
+/// This — not the gross figure — is the most a tap may give back. It is what
+/// makes repeated corrections safe: `T = A + B` keeps holding with `A` the
+/// caller's net and `B` everyone else's net, so once a caregiver has given back
+/// everything they logged, further taps can never reach another caregiver's
+/// water, and `T` can never fall below `B` or below zero.
+double waterOwnNetFlOz(
+  List<WaterLogsRecord> logs,
+  DateTime now,
+  String uid,
+) {
+  if (uid.isEmpty) {
+    return 0;
+  }
+  var total = 0.0;
+  for (final log in waterLogsForLocalDay(logs, now)) {
+    if (log.loggedByUid == uid) {
+      total += log.amountFlOz;
+    }
+  }
+  return total;
+}
+
+/// What a tap on a drop does.
+enum WaterTapKind {
+  /// The drop is above the total: one positive intake record is written.
+  fill,
+
+  /// The drop is below the total: one negative adjustment record is written.
+  correction,
+
+  /// Nothing is written.
+  noOp,
+}
+
+/// The outcome of a tap on one of the nine drops.
+class WaterTapOutcome {
+  const WaterTapOutcome._({
+    required this.kind,
+    required this.amountFlOz,
+    required this.targetFlOz,
+    required this.newTotalFlOz,
+    this.clamped = false,
+    this.message,
+  });
+
+  /// What the tap does.
+  final WaterTapKind kind;
+
+  /// The MAGNITUDE to write, in fluid ounces. Zero for [WaterTapKind.noOp].
+  final double amountFlOz;
+
+  /// The drop's position in fluid ounces (`N * 8`).
+  final double targetFlOz;
+
+  /// The total the card shows once the write lands.
+  final double newTotalFlOz;
+
+  /// True when a correction had to stop at the caller's own intake instead of
+  /// reaching [targetFlOz], because the rest belongs to another caregiver.
+  final bool clamped;
+
+  /// The snackbar line for this tap. Null when there is nothing to say.
+  final String? message;
+
+  /// True when the tap writes a document.
+  bool get writes => kind != WaterTapKind.noOp;
+
+  /// True when the tap writes a negative adjustment rather than intake.
+  bool get isCorrection => kind == WaterTapKind.correction;
+}
+
+/// What a tap on drop [glassNumber] (1-based) does, given today's records
+/// [logs], the device-local day containing [now], and the caller's [uid].
+///
+/// * `N * 8 > T` — fill: add the difference up to N (unchanged behaviour).
+/// * `N * 8 == T` — no-op: already exactly at that drop.
+/// * `N * 8 < T` — correction of `T - N * 8`, capped at the caller's own net
+///   intake today (`A`: their entries plus their own corrections). If the
+///   caller has nothing of their own left to give back, nothing is written and
+///   the honest reason is returned.
+///
+/// `T` can never fall below `B` (everyone else's net entries) and can never go
+/// negative: a correction never exceeds `A`, and a hard clamp at the current
+/// total sits behind that as a second guard.
+WaterTapOutcome waterTapOutcome({
+  required int glassNumber,
+  required List<WaterLogsRecord> logs,
+  required DateTime now,
+  required String uid,
+}) {
+  final total = waterTotalFlOz(logs, now);
+  final target = glassNumber * waterGlassFlOz;
+
+  WaterTapOutcome noOp({String? message}) => WaterTapOutcome._(
+        kind: WaterTapKind.noOp,
+        amountFlOz: 0,
+        targetFlOz: target,
+        newTotalFlOz: total,
+        message: message,
+      );
+
+  if (glassNumber < 1 || glassNumber > waterGlassCount) {
+    return noOp();
+  }
+
+  final difference = total - target;
+  // Within a hundredth of a fluid ounce is "exactly there": amounts are typed
+  // in fl oz and the day is summed from doubles.
+  if (difference.abs() < 0.001) {
+    return noOp();
+  }
+  if (difference < 0) {
+    final amount = -difference;
+    return WaterTapOutcome._(
+      kind: WaterTapKind.fill,
+      amountFlOz: amount,
+      targetFlOz: target,
+      newTotalFlOz: total + amount,
+      message: '${formatWaterFlOz(amount)} added',
+    );
+  }
+
+  final ownNet = waterOwnNetFlOz(logs, now, uid);
+  if (ownNet <= 0) {
+    return noOp(
+      message: waterOwnLoggedFlOz(logs, now, uid) > 0
+          ? waterNothingLeftToReduce
+          : waterNothingToReduce,
+    );
+  }
+  final correction = math.min(math.min(difference, ownNet), total);
+  if (correction <= 0) {
+    return noOp(message: waterNothingToReduce);
+  }
+  final newTotal = total - correction;
+  final clamped = correction < difference - 0.001;
+  return WaterTapOutcome._(
+    kind: WaterTapKind.correction,
+    amountFlOz: correction,
+    targetFlOz: target,
+    newTotalFlOz: newTotal,
+    clamped: clamped,
+    message: clamped
+        ? waterReducedToMessage(newTotal)
+        : '${formatWaterFlOz(correction)} removed',
+  );
+}
+
+/// The wording contract for a correction on any future water history screen or
+/// report row: **"Adjusted −16 fl oz (to 32 fl oz)"**.
+///
+/// An adjustment is never shown as "16 fl oz of water" — it is a correction of
+/// the tracked figure, with its own time and author, and it is visually
+/// distinct from intake. Reports sum intake from positive `amountFlOz` only
+/// ([waterIntakeOnlyFlOz]) and list adjustments separately under this label.
+String formatWaterAdjustment(double amountFlOz, double targetFlOz) =>
+    'Adjusted −${formatWaterFlOz(amountFlOz.abs())} '
+    '(to ${formatWaterFlOz(targetFlOz)})';
 
 /// Formats an amount in fluid ounces for display ("24 fl oz", "0 fl oz",
 /// "12.5 fl oz") — trailing zeros are dropped, the value is never rounded away.
