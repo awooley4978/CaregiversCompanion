@@ -21,7 +21,7 @@
 // of records the water card already created.
 //
 // The read is recipient-scoped and bounded (see [waterHistoryWindowDays] and
-// [waterHistoryReadLimit]): an unconstrained `waterLogs` list is denied by the
+// [waterHistoryMaxEntries]): an unconstrained `waterLogs` list is denied by the
 // deployed rules, and the window/limit keep the query small.
 import '/backend/backend.dart';
 import '/backend/org/org_service.dart';
@@ -107,7 +107,7 @@ class _WaterHistoryWidgetState extends State<WaterHistoryWidget> {
       final recipient = await CareRecipientsRecord.getDocumentOnce(ref);
       // The window and the limit live with the query (water_history.dart): only
       // the most recent [waterHistoryWindowDays] local days are requested, at
-      // most [waterHistoryReadLimit] documents — never an unbounded read.
+      // most [waterHistoryMaxEntries] documents — never an unbounded read.
       final logs = await waterHistoryEntriesForRecipient(
         recipientRef: ref,
         now: now,

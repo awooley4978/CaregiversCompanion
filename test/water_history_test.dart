@@ -391,7 +391,7 @@ void main() {
         now: now,
       );
       expect(all.length, 5);
-      expect(waterHistoryReadLimit, greaterThanOrEqualTo(5));
+      expect(waterHistoryMaxEntries, greaterThanOrEqualTo(5));
 
       // The same query with a smaller bound returns only the newest entries,
       // which is what keeps an unbounded read impossible.

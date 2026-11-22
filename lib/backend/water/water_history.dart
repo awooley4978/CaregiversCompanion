@@ -21,7 +21,7 @@
 //  * an author that cannot be resolved degrades to the app's existing
 //    "Unknown user" convention — no invented name and never a uid;
 //  * the read is bounded: the most recent [waterHistoryWindowDays] days and at
-//    most [waterHistoryReadLimit] documents, so the screen can never issue an
+//    most [waterHistoryMaxEntries] documents, so the screen can never issue an
 //    unbounded collection query.
 //
 // The functions are pure so they can be tested without a widget tree.
@@ -39,9 +39,9 @@ const int waterHistoryWindowDays = 90;
 
 /// Upper bound on the documents one history read may return. A recipient with
 /// more entries than this inside the window sees the newest
-/// [waterHistoryReadLimit] of them; the query is ordered `intakeAt` descending,
+/// [waterHistoryMaxEntries] of them; the query is ordered `intakeAt` descending,
 /// so the entries that fall off are the oldest ones.
-const int waterHistoryReadLimit = 200;
+const int waterHistoryMaxEntries = 200;
 
 /// The screen's title.
 const String waterHistoryTitle = 'Water History';
@@ -85,7 +85,7 @@ DateTime waterHistoryWindowStart(DateTime now) {
 Future<List<WaterLogsRecord>> waterHistoryEntriesForRecipient({
   required DocumentReference? recipientRef,
   required DateTime now,
-  int limit = waterHistoryReadLimit,
+  int limit = waterHistoryMaxEntries,
 }) {
   if (recipientRef == null) {
     return Future.value(const <WaterLogsRecord>[]);
