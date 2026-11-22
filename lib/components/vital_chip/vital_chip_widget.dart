@@ -14,12 +14,20 @@ class VitalChipWidget extends StatefulWidget {
     this.icon,
     String? label,
     String? value,
+    this.date,
   })  : this.label = label ?? 'Heart Rate',
-        this.value = value ?? '72 bpm';
+        this.value = value ?? '';
 
   final Widget? icon;
   final String label;
+
+  /// The reading's value text, or the honest empty state ("No reading yet").
+  /// There is deliberately no default: a chip never invents a measurement.
   final String value;
+
+  /// Optional short date of this reading ('Nov 21, 9:15 AM'), shown under the
+  /// value. Null when there is nothing to date.
+  final String? date;
 
   @override
   State<VitalChipWidget> createState() => _VitalChipWidgetState();
@@ -105,7 +113,7 @@ class _VitalChipWidgetState extends State<VitalChipWidget> {
               Text(
                 valueOrDefault<String>(
                   widget!.value,
-                  '72 bpm',
+                  '',
                 ),
                 style: FlutterFlowTheme.of(context).titleMedium.override(
                       font: GoogleFonts.dmSans(
@@ -121,6 +129,27 @@ class _VitalChipWidgetState extends State<VitalChipWidget> {
                       lineHeight: 1.45,
                     ),
               ),
+              // The reading's own date, under its value. Absent when there is
+              // no reading (or the record carries no time) - never a guess.
+              if ((widget!.date ?? '').isNotEmpty)
+                Text(
+                  widget!.date!,
+                  style: FlutterFlowTheme.of(context).labelSmall.override(
+                        font: GoogleFonts.nunito(
+                          fontWeight:
+                              FlutterFlowTheme.of(context).labelSmall.fontWeight,
+                          fontStyle:
+                              FlutterFlowTheme.of(context).labelSmall.fontStyle,
+                        ),
+                        color: FlutterFlowTheme.of(context).secondaryText,
+                        letterSpacing: 0.0,
+                        fontWeight:
+                            FlutterFlowTheme.of(context).labelSmall.fontWeight,
+                        fontStyle:
+                            FlutterFlowTheme.of(context).labelSmall.fontStyle,
+                        lineHeight: 1.3,
+                      ),
+                ),
             ].divide(SizedBox(height: 4.0)),
           ),
         ),
