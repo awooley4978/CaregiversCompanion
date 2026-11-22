@@ -2,7 +2,8 @@
 // Dashboard's "Daily Water Intake" card.
 //
 // Owner decisions of 2026-11-13 (proposal §9) that shape this file:
-//  * D1 — a glass tap quick-adds 8 fl oz; a custom amount is typed in fl oz.
+//  * D1 — a glass tap fills every glass up to the one tapped (tap N adds
+//    `N * 8 - todayTotal`, as ONE record); a custom amount is typed in fl oz.
 //  * D3 — the nine glasses are NOT a target: each filled glass is 8 fl oz of
 //    intake actually logged today, `min(9, floor(total / 8))`. Nine is only the
 //    number of icons the existing design draws, so past 72 fl oz all nine stay
@@ -94,6 +95,26 @@ int waterGlassesFilled(double totalFlOz) {
     return 0;
   }
   return math.min(waterGlassCount, (totalFlOz / waterGlassFlOz).floor());
+}
+
+/// The amount a tap on glass [glassNumber] (1-based) adds, given today's real
+/// total [totalFlOz]: the difference up to that glass's position, so one tap
+/// fills every glass up to the one tapped (tap 4 with 8 fl oz already logged
+/// adds 24 fl oz → 32 fl oz).
+///
+/// Returns 0 — meaning "write nothing at all" — when there is nothing to add:
+/// the tapped glass is already filled (`glassNumber * 8 <= totalFlOz`), the
+/// total is already past it, or the number is outside the nine drawn glasses.
+/// A filled glass is never emptied by rewriting or deleting a record.
+///
+/// The largest amount a tap can add is 72 fl oz (glass 9 from an empty day), so
+/// the 200 fl oz per-entry sanity ceiling is never reachable here.
+double waterAmountToAddForGlass(int glassNumber, double totalFlOz) {
+  if (glassNumber < 1 || glassNumber > waterGlassCount) {
+    return 0;
+  }
+  final difference = glassNumber * waterGlassFlOz - totalFlOz;
+  return difference > 0 ? difference : 0;
 }
 
 /// Formats an amount in fluid ounces for display ("24 fl oz", "0 fl oz",

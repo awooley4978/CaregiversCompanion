@@ -382,13 +382,23 @@ class _DailyWaterCardWidgetState extends State<DailyWaterCardWidget> {
                                   glass++)
                                 Semantics(
                                   button: true,
-                                  label: 'Add 8 fl oz of water',
+                                  label:
+                                      'Fill up to ${formatWaterFlOz((glass + 1) * waterGlassFlOz)}',
                                   child: GestureDetector(
                                     key: ValueKey('waterGlass$glass'),
                                     behavior: HitTestBehavior.opaque,
-                                    onTap: canAdd
+                                    // Tapping glass N fills every glass up to N
+                                    // in ONE record: the difference between N's
+                                    // position and today's real total. An
+                                    // already-filled glass has nothing to add,
+                                    // so it is a no-op — no write, no snackbar.
+                                    onTap: canAdd &&
+                                            waterAmountToAddForGlass(
+                                                    glass + 1, total) >
+                                                0
                                         ? () => _addWater(
-                                              waterGlassFlOz,
+                                              waterAmountToAddForGlass(
+                                                  glass + 1, total),
                                               isQuickAdd: true,
                                             )
                                         : null,
