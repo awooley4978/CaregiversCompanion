@@ -9,8 +9,9 @@
 //  * a seeded day renders the real fl-oz total and the right filled count;
 //  * past 72 fl oz all nine glasses stay filled and the total keeps counting
 //    (the glasses are not a goal);
-//  * tapping a glass writes exactly ONE attributed 8 fl oz record (orgId from
-//    the recipient, loggedByUid = the caller, unit + amountFlOz canonical);
+//  * tapping glass N writes exactly ONE record holding the difference up to N
+//    (tap 4 from empty → 32 fl oz; tap 4 with 8 fl oz logged → 24 fl oz), so
+//    Undo removes exactly that tap; a filled glass writes nothing at all;
 //  * the custom-amount sheet writes the entered amount, and invalid input
 //    writes nothing and names the field and its range;
 //  * Undo deletes exactly the record that action created, and a refused delete
@@ -202,6 +203,44 @@ void main() {
       expect(waterGlassesFilled(88), 9);
     });
 
+    test('a tap adds the difference up to the tapped glass', () {
+      // From an empty day, glass N adds N glasses.
+      expect(waterAmountToAddForGlass(1, 0), 8);
+      expect(waterAmountToAddForGlass(4, 0), 32);
+      expect(waterAmountToAddForGlass(9, 0), 72);
+      // 72 fl oz is the most one tap can add, well under the 200 fl oz ceiling.
+      expect(waterAmountToAddForGlass(9, 0), lessThan(waterMaxEntryFlOz));
+    });
+
+    test('a partially filled day only adds the missing glasses', () {
+      // 12 fl oz → glass 1 is filled (and glass 2 is not).
+      expect(waterAmountToAddForGlass(1, 12), 0);
+      expect(waterAmountToAddForGlass(2, 12), 4);
+      expect(waterAmountToAddForGlass(3, 12), 12);
+      // 8 fl oz already logged: tap 4 adds 24, reaching 32.
+      expect(waterAmountToAddForGlass(4, 8), 24);
+    });
+
+    test('a glass that is already filled adds nothing', () {
+      expect(waterAmountToAddForGlass(1, 8), 0);
+      expect(waterAmountToAddForGlass(1, 40), 0);
+      expect(waterAmountToAddForGlass(4, 32), 0);
+      expect(waterAmountToAddForGlass(4, 33), 0);
+    });
+
+    test('with all nine filled every tap adds nothing', () {
+      for (var glass = 1; glass <= waterGlassCount; glass++) {
+        expect(waterAmountToAddForGlass(glass, 72), 0);
+        expect(waterAmountToAddForGlass(glass, 88), 0);
+      }
+    });
+
+    test('glass numbers outside the nine drawn glasses add nothing', () {
+      expect(waterAmountToAddForGlass(0, 0), 0);
+      expect(waterAmountToAddForGlass(-1, 0), 0);
+      expect(waterAmountToAddForGlass(10, 0), 0);
+    });
+
     test('the total is formatted in fluid ounces without a goal', () {
       expect(formatWaterFlOz(0), '0 fl oz');
       expect(formatWaterFlOz(24), '24 fl oz');
@@ -335,6 +374,58 @@ void main() {
       // The card refreshes from Firestore: 8 fl oz, one glass filled.
       expect(find.text('8 fl oz'), findsOneWidget);
       expect(filledGlasses(tester), 1);
+    });
+
+    testWidgets('tapping glass 4 fills glasses 1-4 with ONE record',
+        (tester) async {
+      await seedRecipient(orgId: 'org_test');
+      await seedIntake(at: DateTime.now(), amountFlOz: 8);
+      await pumpCard(tester);
+      expect(filledGlasses(tester), 1);
+
+      await tester.tap(find.byKey(const ValueKey('waterGlass3')));
+      await tester.pumpAndSettle();
+
+      // One new document holding the difference up to 32 fl oz, attributed.
+      expect(waterDocs().length, 2);
+      final added = (await savedWater())
+          .where((record) => record.amountFlOz == 24)
+          .single;
+      expect(added.amount, 24);
+      expect(added.unit, waterUnitFlOz);
+      expect(added.orgId, 'org_test');
+      expect(added.loggedByUid, 'uid-1');
+      expect(find.text('24 fl oz added'), findsOneWidget);
+
+      // The card refreshes from Firestore: 32 fl oz, four glasses filled.
+      expect(find.text('32 fl oz'), findsOneWidget);
+      expect(filledGlasses(tester), 4);
+
+      // Undo removes exactly the record that tap created — the 8 fl oz
+      // entry logged earlier stays.
+      await tester.tap(find.text('Undo'));
+      await tester.pumpAndSettle();
+
+      expect(waterDocs().length, 1);
+      expect((await savedWater()).single.amountFlOz, 8);
+      expect(find.text('8 fl oz'), findsOneWidget);
+      expect(filledGlasses(tester), 1);
+    });
+
+    testWidgets('tapping an already filled glass writes nothing',
+        (tester) async {
+      await seedRecipient();
+      await seedIntake(at: DateTime.now(), amountFlOz: 24);
+      await pumpCard(tester);
+      expect(filledGlasses(tester), 3);
+
+      await tester.tap(find.byKey(const ValueKey('waterGlass0')));
+      await tester.pumpAndSettle();
+
+      // No write, no snackbar, nothing removed to "empty" the glass.
+      expect(waterDocs().length, 1);
+      expect(find.text('24 fl oz'), findsOneWidget);
+      expect(find.textContaining('fl oz added'), findsNothing);
     });
 
     testWidgets('the ~5 s Undo removes exactly the record that was added',
