@@ -295,7 +295,8 @@ String medicationCardSubtitle(List<MedicationsRecord> meds, DateTime now) {
   final parts = <String>[
     if (schedule.isNotEmpty) schedule,
     if (dose.scheduledTime != null)
-      dateTimeFormat('hh:mm a', dose.scheduledTime),
+      // Stored as a UTC instant; the caregiver sees the device-local clock time.
+      dateTimeFormat('hh:mm a', dose.scheduledTime!.toLocal()),
   ];
   return parts.join(' • ');
 }
@@ -340,7 +341,9 @@ String mealEntrySubtitle(MealEntriesRecord meal) {
   final parts = <String>[
     if (meal.mealType.trim().isNotEmpty) meal.mealType.trim(),
     if (meal.amountEaten.trim().isNotEmpty) meal.amountEaten.trim(),
-    if (meal.createdAt != null) dateTimeFormat('hh:mm a', meal.createdAt),
+    // `createdAt` is a UTC instant; the clock time shown is device-local.
+    if (meal.createdAt != null)
+      dateTimeFormat('hh:mm a', meal.createdAt!.toLocal()),
   ];
   return parts.join(' • ');
 }

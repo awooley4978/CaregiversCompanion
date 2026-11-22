@@ -174,9 +174,12 @@ class _FCareNotesWidgetState extends State<FCareNotesWidget> {
     String patientName,
   ) {
     final theme = FlutterFlowTheme.of(context);
+    // Firestore hands back a UTC instant; the note is shown in the device's
+    // local timezone (toLocal() is a no-op for an already-local value).
     final when = note.noteDateTime ?? note.createdAt;
-    final timeLabel =
-        when != null ? dateTimeFormat('MMM d, yyyy · hh:mm a', when) : '';
+    final timeLabel = when != null
+        ? dateTimeFormat('MMM d, yyyy · hh:mm a', when.toLocal())
+        : '';
     final author =
         note.createdBy.trim().isNotEmpty ? note.createdBy.trim() : 'Caregiver';
     final initials = author
