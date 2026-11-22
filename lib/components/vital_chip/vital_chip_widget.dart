@@ -87,29 +87,37 @@ class _VitalChipWidgetState extends State<VitalChipWidget> {
                   // chip without one renders its label alone instead of
                   // throwing on a null check.
                   if (widget!.icon != null) widget!.icon!,
-                  Text(
-                    valueOrDefault<String>(
-                      widget!.label,
-                      'Heart Rate',
-                    ),
-                    style: FlutterFlowTheme.of(context).labelSmall.override(
-                          font: GoogleFonts.nunito(
+                  // The chip is only 113 wide, so the label is given whatever
+                  // room the icon leaves and may wrap onto a second line - it
+                  // never pushes the row past the chip's edge.
+                  Flexible(
+                    child: Text(
+                      valueOrDefault<String>(
+                        widget!.label,
+                        'Heart Rate',
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: FlutterFlowTheme.of(context).labelSmall.override(
+                            font: GoogleFonts.nunito(
+                              fontWeight: FlutterFlowTheme.of(context)
+                                  .labelSmall
+                                  .fontWeight,
+                              fontStyle: FlutterFlowTheme.of(context)
+                                  .labelSmall
+                                  .fontStyle,
+                            ),
+                            color: FlutterFlowTheme.of(context).secondaryText,
+                            letterSpacing: 0.0,
                             fontWeight: FlutterFlowTheme.of(context)
                                 .labelSmall
                                 .fontWeight,
                             fontStyle: FlutterFlowTheme.of(context)
                                 .labelSmall
                                 .fontStyle,
+                            lineHeight: 1.3,
                           ),
-                          color: FlutterFlowTheme.of(context).secondaryText,
-                          letterSpacing: 0.0,
-                          fontWeight: FlutterFlowTheme.of(context)
-                              .labelSmall
-                              .fontWeight,
-                          fontStyle:
-                              FlutterFlowTheme.of(context).labelSmall.fontStyle,
-                          lineHeight: 1.3,
-                        ),
+                    ),
                   ),
                 ].divide(SizedBox(width: 4.0)),
               ),
