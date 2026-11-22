@@ -50,6 +50,11 @@ Stream<List<WaterLogsRecord>> waterLogsForRecipient({
 ///  * a "Custom amount" affordance opens a one-field fl-oz sheet;
 ///  * a quick-add offers a ~5 s Undo that deletes exactly the document that
 ///    action created (and says so honestly when it cannot);
+///  * tapping a drop BELOW today's total lowers it: ONE negative adjustment
+///    document is written (owner decision 2026-11-22), capped at the caller's
+///    own intake today so another caregiver's water is never reduced, and
+///    nothing that already exists is edited or deleted. Undo removes exactly
+///    that adjustment;
 ///  * the total is the real `sum(amountFlOz)` over the DEVICE-LOCAL day, and
 ///    each filled glass is 8 fl oz of intake actually logged today, capped at
 ///    the nine icons the design draws — the glasses are not a target and the
@@ -125,7 +130,19 @@ class _DailyWaterCardWidgetState extends State<DailyWaterCardWidget> {
   /// `orgId` comes from the recipient record itself (never from local state),
   /// `loggedByUid` is the caller, and `intakeAt` is now — the three fields the
   /// owner-approved rules validate.
-  Future<void> _addWater(double amountFlOz, {required bool isQuickAdd}) async {
+  ///
+  /// Intake is written with a positive [amountFlOz]. A correction
+  /// ([isAdjustment]) is written with a NEGATIVE [amountFlOz], a positive
+  /// `amount` (the magnitude the rules require) and the `targetFlOz` drop it
+  /// landed on, so a correction is always distinguishable from intake. Either
+  /// way it is ONE new document: nothing existing is edited or deleted.
+  Future<void> _writeWaterEntry({
+    required double amountFlOz,
+    required bool isAdjustment,
+    double? targetFlOz,
+    required String snackbarMessage,
+    required bool offersUndo,
+  }) async {
     final recipientRef = widget.recipientRef;
     if (recipientRef == null) {
       _setStatus(waterSelectRecipient, isError: true);
@@ -165,9 +182,11 @@ class _DailyWaterCardWidgetState extends State<DailyWaterCardWidget> {
           orgId: orgId,
           loggedByUid: uid,
           intakeAt: DateTime.now(),
-          amount: amountFlOz,
+          amount: amountFlOz.abs(),
           unit: waterUnitFlOz,
           amountFlOz: amountFlOz,
+          adjustment: isAdjustment ? true : null,
+          targetFlOz: isAdjustment ? targetFlOz : null,
         ),
       );
       if (!mounted) {
@@ -177,11 +196,11 @@ class _DailyWaterCardWidgetState extends State<DailyWaterCardWidget> {
       // Re-read so the drops and the total always agree with Firestore.
       _syncStream();
       setState(() {});
-      if (isQuickAdd) {
-        _showUndo(docRef, amountFlOz);
+      if (offersUndo) {
+        _showUndo(docRef, snackbarMessage);
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${formatWaterFlOz(amountFlOz)} added')),
+          SnackBar(content: Text(snackbarMessage)),
         );
       }
     } catch (_) {
@@ -196,15 +215,64 @@ class _DailyWaterCardWidgetState extends State<DailyWaterCardWidget> {
     }
   }
 
-  /// The ~5 s Undo for an accidental quick-add. Undo deletes exactly [docRef] —
-  /// the document this action created — never "the latest record".
-  void _showUndo(DocumentReference docRef, double amountFlOz) {
+  /// A quick-add or a custom amount: one positive intake record.
+  Future<void> _addWater(double amountFlOz, {required bool isQuickAdd}) {
+    return _writeWaterEntry(
+      amountFlOz: amountFlOz,
+      isAdjustment: false,
+      snackbarMessage: '${formatWaterFlOz(amountFlOz)} added',
+      offersUndo: isQuickAdd,
+    );
+  }
+
+  /// One tap on drop [glassNumber], decided from the records on screen.
+  ///
+  /// Above the total → fill (one positive record). Exactly at the total →
+  /// nothing. Below the total → ONE negative adjustment, capped at the
+  /// caller's own intake today; with none of their own, nothing is written and
+  /// the honest reason is shown.
+  Future<void> _onGlassTap(
+    int glassNumber,
+    List<WaterLogsRecord> records,
+  ) async {
+    final outcome = waterTapOutcome(
+      glassNumber: glassNumber,
+      logs: records,
+      now: DateTime.now(),
+      uid: FirebaseAuth.instance.currentUser?.uid ?? '',
+    );
+    if (outcome.isCorrection) {
+      await _writeWaterEntry(
+        amountFlOz: -outcome.amountFlOz,
+        isAdjustment: true,
+        targetFlOz: outcome.targetFlOz,
+        snackbarMessage: outcome.message!,
+        offersUndo: true,
+      );
+      return;
+    }
+    if (outcome.writes) {
+      await _addWater(outcome.amountFlOz, isQuickAdd: true);
+      return;
+    }
+    final message = outcome.message;
+    if (message != null && mounted) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(message)));
+    }
+  }
+
+  /// The ~5 s Undo for an accidental quick-add or correction. Undo deletes
+  /// exactly [docRef] — the document this action created — never "the latest
+  /// record", and never anything that existed before the tap.
+  void _showUndo(DocumentReference docRef, String message) {
     final messenger = ScaffoldMessenger.of(context);
     messenger.hideCurrentSnackBar();
     messenger.showSnackBar(
       SnackBar(
         duration: waterUndoWindow,
-        content: Text('${formatWaterFlOz(amountFlOz)} added'),
+        content: Text(message),
         action: SnackBarAction(
           label: 'Undo',
           onPressed: () => _undo(docRef),
@@ -282,9 +350,21 @@ class _DailyWaterCardWidgetState extends State<DailyWaterCardWidget> {
           final failed = snapshot.hasError;
           final loaded = snapshot.hasData;
           final records = snapshot.data ?? const <WaterLogsRecord>[];
-          final total = waterTotalFlOz(records, DateTime.now());
+          final now = DateTime.now();
+          final total = waterTotalFlOz(records, now);
           final filled = failed ? 0 : waterGlassesFilled(total);
           final canAdd = hasRecipient && !_writing;
+          // What each of the nine drops does, decided once per build from the
+          // records on screen: fill, correction, or nothing.
+          final tapOutcomes = [
+            for (var glass = 1; glass <= waterGlassCount; glass++)
+              waterTapOutcome(
+                glassNumber: glass,
+                logs: records,
+                now: now,
+                uid: FirebaseAuth.instance.currentUser?.uid ?? '',
+              ),
+          ];
 
           return Row(
             mainAxisSize: MainAxisSize.max,
@@ -387,19 +467,21 @@ class _DailyWaterCardWidgetState extends State<DailyWaterCardWidget> {
                                   child: GestureDetector(
                                     key: ValueKey('waterGlass$glass'),
                                     behavior: HitTestBehavior.opaque,
-                                    // Tapping glass N fills every glass up to N
-                                    // in ONE record: the difference between N's
-                                    // position and today's real total. An
-                                    // already-filled glass has nothing to add,
-                                    // so it is a no-op — no write, no snackbar.
+                                    // Tapping a drop ABOVE the total fills every
+                                    // drop up to it in ONE record; tapping a drop
+                                    // BELOW the total writes ONE negative
+                                    // adjustment, capped at the caller's own
+                                    // intake today; tapping the drop already at
+                                    // the total writes nothing. A tap that has
+                                    // something to say (no intake of your own to
+                                    // give back) stays live so it can say it.
                                     onTap: canAdd &&
-                                            waterAmountToAddForGlass(
-                                                    glass + 1, total) >
-                                                0
-                                        ? () => _addWater(
-                                              waterAmountToAddForGlass(
-                                                  glass + 1, total),
-                                              isQuickAdd: true,
+                                            (tapOutcomes[glass].writes ||
+                                                tapOutcomes[glass].message !=
+                                                    null)
+                                        ? () => _onGlassTap(
+                                              glass + 1,
+                                              records,
                                             )
                                         : null,
                                     child: SizedBox(

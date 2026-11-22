@@ -9,7 +9,8 @@ import '/backend/schema/util/schema_util.dart';
 import 'index.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 
-/// One `waterLogs` document: a single, individually timestamped water intake.
+/// One `waterLogs` document: a single, individually timestamped water intake,
+/// or — when `adjustment` is true — a single correction of the tracked total.
 ///
 /// Owner decisions of 2026-11-13 (proposal §2/§9) that shape this record:
 ///  * one document per intake — there is no cumulative total on the care
@@ -19,6 +20,15 @@ import '/flutter_flow/flutter_flow_util.dart';
 ///    total can never mix units;
 ///  * `intakeAt` is when the water was drunk and is always "now" in this unit;
 ///  * `orgId` and `loggedByUid` are the attribution the rules require.
+///
+/// Owner decisions of 2026-11-22 (water-tap-to-empty-spec.md §2):
+///  * a correction is a NEW document, never an edit or a delete of an existing
+///    one: `adjustment: true`, `amount` holds the positive magnitude (the
+///    deployed rules require `amount > 0`), `amountFlOz` holds the NEGATIVE
+///    signed value so `sum(amountFlOz)` is the honest net total, and
+///    `targetFlOz` records the drop the correction landed on;
+///  * `intakeAt` on a correction is when the correction was made, not an intake
+///    time, and `adjustment: true` is what keeps the two distinguishable.
 class WaterLogsRecord extends FirestoreRecord {
   WaterLogsRecord._(
     DocumentReference reference,
@@ -67,6 +77,16 @@ class WaterLogsRecord extends FirestoreRecord {
   String get notes => _notes ?? '';
   bool hasNotes() => _notes != null;
 
+  // "adjustment" field.
+  bool? _adjustment;
+  bool get adjustment => _adjustment ?? false;
+  bool hasAdjustment() => _adjustment != null;
+
+  // "targetFlOz" field.
+  double? _targetFlOz;
+  double get targetFlOz => _targetFlOz ?? 0.0;
+  bool hasTargetFlOz() => _targetFlOz != null;
+
   void _initializeFields() {
     _careRecipientRef = snapshotData['careRecipientRef'] as DocumentReference?;
     _orgId = castToType<String>(snapshotData['orgId']);
@@ -76,6 +96,8 @@ class WaterLogsRecord extends FirestoreRecord {
     _unit = castToType<String>(snapshotData['unit']);
     _amountFlOz = castToType<double>(snapshotData['amountFlOz']);
     _notes = snapshotData['notes'] as String?;
+    _adjustment = snapshotData['adjustment'] as bool?;
+    _targetFlOz = castToType<double>(snapshotData['targetFlOz']);
   }
 
   static CollectionReference get collection =>
@@ -121,6 +143,8 @@ Map<String, dynamic> createWaterLogsRecordData({
   String? unit,
   double? amountFlOz,
   String? notes,
+  bool? adjustment,
+  double? targetFlOz,
 }) {
   final firestoreData = mapToFirestore(
     <String, dynamic>{
@@ -134,6 +158,10 @@ Map<String, dynamic> createWaterLogsRecordData({
       'unit': unit,
       'amountFlOz': amountFlOz,
       'notes': notes,
+      // Only a correction carries these two fields; an intake record's shape is
+      // unchanged (both are dropped when null).
+      'adjustment': adjustment,
+      'targetFlOz': targetFlOz,
     }.withoutNulls,
   );
 
@@ -152,7 +180,9 @@ class WaterLogsRecordDocumentEquality implements Equality<WaterLogsRecord> {
         e1?.amount == e2?.amount &&
         e1?.unit == e2?.unit &&
         e1?.amountFlOz == e2?.amountFlOz &&
-        e1?.notes == e2?.notes;
+        e1?.notes == e2?.notes &&
+        e1?.adjustment == e2?.adjustment &&
+        e1?.targetFlOz == e2?.targetFlOz;
   }
 
   @override
@@ -164,7 +194,9 @@ class WaterLogsRecordDocumentEquality implements Equality<WaterLogsRecord> {
         e?.amount,
         e?.unit,
         e?.amountFlOz,
-        e?.notes
+        e?.notes,
+        e?.adjustment,
+        e?.targetFlOz
       ]);
 
   @override
