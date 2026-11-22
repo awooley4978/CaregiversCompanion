@@ -225,6 +225,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: VitalChipWidget(
+              icon: const Icon(Icons.favorite_rounded),
               label: 'Heart Rate',
               value: value,
               date: date,

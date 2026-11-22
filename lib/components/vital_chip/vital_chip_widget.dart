@@ -83,7 +83,10 @@ class _VitalChipWidgetState extends State<VitalChipWidget> {
                 mainAxisAlignment: MainAxisAlignment.start,
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  widget!.icon!,
+                  // The icon is optional in this component's constructor; a
+                  // chip without one renders its label alone instead of
+                  // throwing on a null check.
+                  if (widget!.icon != null) widget!.icon!,
                   Text(
                     valueOrDefault<String>(
                       widget!.label,
