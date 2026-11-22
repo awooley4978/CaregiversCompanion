@@ -150,6 +150,23 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
           path: EVitalsTrackerLogWidget.routePath,
           builder: (context, params) => EVitalsTrackerLogWidget(),
         ),
+        // Read-only water history (owner direction 2026-11-22), opened from the
+        // Daily Water card's History link. The optional `careRecipientId` is the
+        // recipient the card is showing; with none the page falls back to the
+        // app-wide selection. The screen writes nothing.
+        FFRoute(
+          name: WaterHistoryWidget.routeName,
+          path: WaterHistoryWidget.routePath,
+          builder: (context, params) {
+            final String? recipientId =
+                params.getParam<String>('careRecipientId', ParamType.String);
+            return WaterHistoryWidget(
+              careRecipients: recipientId == null || recipientId.isEmpty
+                  ? null
+                  : CareRecipientsRecord.collection.doc(recipientId),
+            );
+          },
+        ),
         FFRoute(
           name: DMedicationTrackerWidget.routeName,
           path: DMedicationTrackerWidget.routePath,

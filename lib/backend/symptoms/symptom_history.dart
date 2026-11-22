@@ -84,6 +84,15 @@ String symptomEntryHeadline(SymptomEntriesRecord record) {
 /// The row's note, exactly as it was stored ('' when none was written).
 String symptomEntryNote(SymptomEntriesRecord record) => record.note.trim();
 
+/// The device-local clock time of a stored instant ('8:00 PM').
+///
+/// This is the one time-of-day format the app prints for a record, so screens
+/// that already show the day (e.g. the water history rows) reuse it instead of
+/// inventing a second style. `toLocal()` is a no-op for an already-local value
+/// and nothing about the stored instant changes.
+String symptomLocalTimeLabel(DateTime when) =>
+    DateFormat('h:mm a').format(when.toLocal());
+
 /// 'Today at 8:00 PM' / 'Yesterday at 8:00 PM' / 'Nov 18 at 9:15 AM'.
 ///
 /// Produced only by comparing the stored time to [now]; an entry with no
@@ -96,7 +105,7 @@ String symptomEntryWhenLabel(DateTime? when, {DateTime? now}) {
   final current = now ?? DateTime.now();
   final reference = DateTime(current.year, current.month, current.day);
   final day = DateTime(local.year, local.month, local.day);
-  final time = DateFormat('h:mm a').format(local);
+  final time = symptomLocalTimeLabel(when);
   if (day == reference) {
     return 'Today at $time';
   }

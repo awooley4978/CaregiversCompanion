@@ -29,10 +29,10 @@ jobs:
 
       # The water day filter compares DEVICE-LOCAL days, and this runner is UTC,
       # where the old raw-field comparison looked correct. Dart's toLocal()
-      # honours TZ, so the timezone-sensitive file is re-run in a US zone where
-      # the regression test actually fails on the pre-fix code.
+      # honours TZ, so the timezone-sensitive files are re-run in a US zone where
+      # the regression tests actually fail on the pre-fix code.
       - name: Test (non-UTC timezone)
-        run: TZ=America/Chicago flutter test test/water_tracking_test.dart
+        run: TZ=America/Chicago flutter test test/water_tracking_test.dart test/water_history_test.dart
 
       - name: Build web
         run: flutter build web --release
