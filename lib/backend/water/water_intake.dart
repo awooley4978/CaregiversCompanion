@@ -47,8 +47,18 @@ const String waterSelectRecipient = 'Select a care recipient to track water.';
 const String waterUndoKept = 'Could not undo — the entry was kept';
 
 /// True when [a] and [b] fall on the same day in the DEVICE's local timezone.
-bool isSameLocalDay(DateTime a, DateTime b) =>
-    a.year == b.year && a.month == b.month && a.day == b.day;
+///
+/// Firestore hands back UTC instants while "today" comes from `DateTime.now()`
+/// (local), so both sides are converted to local time before their calendar
+/// fields are compared. `toLocal()` is a no-op for an already-local value, and
+/// nothing about the stored instant changes.
+bool isSameLocalDay(DateTime a, DateTime b) {
+  final localA = a.toLocal();
+  final localB = b.toLocal();
+  return localA.year == localB.year &&
+      localA.month == localB.month &&
+      localA.day == localB.day;
+}
 
 /// The records that were logged on the device-local day containing [now].
 ///

@@ -1,4 +1,5 @@
 import '/backend/schema/symptom_entries_record.dart';
+import '/backend/symptoms/symptom_history.dart';
 import '/components/button/button_widget.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
@@ -161,13 +162,19 @@ class _DashboardSymptomCardWidgetState extends State<DashboardSymptomCardWidget>
                             lineHeight: 1.5,
                           ),
                     ),
-                    Text(
-                      valueOrDefault<String>(
-                        record.timeLogged?.toString(),
-                        'Time Logged',
-                      ),
-                      style: FlutterFlowTheme.of(context).bodyMedium.override(
-                            font: GoogleFonts.nunito(
+                    if (symptomEntryWhenLabel(record.timeLogged).isNotEmpty)
+                      Text(
+                        symptomEntryWhenLabel(record.timeLogged),
+                        style: FlutterFlowTheme.of(context).bodyMedium.override(
+                              font: GoogleFonts.nunito(
+                                fontWeight: FlutterFlowTheme.of(context)
+                                    .bodyMedium
+                                    .fontWeight,
+                                fontStyle: FlutterFlowTheme.of(context)
+                                    .bodyMedium
+                                    .fontStyle,
+                              ),
+                              letterSpacing: 0.0,
                               fontWeight: FlutterFlowTheme.of(context)
                                   .bodyMedium
                                   .fontWeight,
@@ -175,15 +182,7 @@ class _DashboardSymptomCardWidgetState extends State<DashboardSymptomCardWidget>
                                   .bodyMedium
                                   .fontStyle,
                             ),
-                            letterSpacing: 0.0,
-                            fontWeight: FlutterFlowTheme.of(context)
-                                .bodyMedium
-                                .fontWeight,
-                            fontStyle: FlutterFlowTheme.of(context)
-                                .bodyMedium
-                                .fontStyle,
-                          ),
-                    ),
+                      ),
                   ].divide(SizedBox(height: 2.0)),
                 ),
               ),

@@ -17,6 +17,11 @@
 //    keeps the entry and says so;
 //  * a failed read shows the honest error state and no total;
 //  * switching care recipients never shows another recipient's intake.
+//
+// TIMEZONE: the day filter must compare DEVICE-LOCAL calendar days, and the CI
+// machine runs in UTC, where the bug is invisible. Run this file in a US zone
+// to exercise it:  TZ=America/Chicago flutter test test/water_tracking_test.dart
+// (ci.yml runs exactly that as a second, non-UTC test step).
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -157,6 +162,31 @@ void main() {
         log(yesterday, 40),
       ];
       expect(waterTotalFlOz(logs, now), 24);
+    });
+
+    // The CI machine runs in UTC, where a raw-field comparison and a local-day
+    // comparison agree, so this case is only meaningful outside UTC. Dart's
+    // `toLocal()` honours the TZ environment variable: `ci.yml` re-runs THIS
+    // file with `TZ=America/Chicago`, and the same command reproduces it
+    // locally. On the pre-fix code (raw `year/month/day` on the UTC instant)
+    // this test fails: 2026-11-22 (UTC) != 2026-11-21 (local).
+    test('an evening UTC instant counts toward the device-local day', () {
+      // 01:15 UTC on Nov 22 is 19:15 on Nov 21 in Chicago (UTC-6).
+      final loggedAt = DateTime.utc(2026, 11, 22, 1, 15);
+      final localLoggedAt = loggedAt.toLocal();
+      final localNow = DateTime(
+        localLoggedAt.year,
+        localLoggedAt.month,
+        localLoggedAt.day,
+        19,
+        30,
+      );
+
+      expect(waterLogsForLocalDay([log(loggedAt, 8)], localNow), hasLength(1));
+      expect(waterTotalFlOz([log(loggedAt, 8)], localNow), 8);
+      // A record logged the next local evening is still a different day.
+      final nextEvening = localNow.add(const Duration(days: 1));
+      expect(waterTotalFlOz([log(loggedAt, 8)], nextEvening), 0);
     });
 
     test('a record without intakeAt cannot be placed in a day', () {

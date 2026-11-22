@@ -152,7 +152,8 @@ class _DMedicationTrackerWidgetState extends State<DMedicationTrackerWidget> {
     // trusting the persisted boolean alone.
     final taken = isTakenForDay(med.takenAt, DateTime.now());
     final timeLabel = med.scheduledTime != null
-        ? dateTimeFormat('hh:mm a', med.scheduledTime)
+        // `scheduledTime` is a UTC instant; show the device-local clock time.
+        ? dateTimeFormat('hh:mm a', med.scheduledTime!.toLocal())
         : (med.timeOfDay.isNotEmpty ? med.timeOfDay : '');
     return MedCardWidget(
       bgTint: taken

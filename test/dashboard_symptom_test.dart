@@ -20,6 +20,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:caregivers_companion/app_state.dart';
 import 'package:caregivers_companion/backend/backend.dart';
 import 'package:caregivers_companion/backend/org/org_service.dart';
+import 'package:caregivers_companion/backend/symptoms/symptom_history.dart';
 import 'package:caregivers_companion/components/dashboard_symptom_add_sheet/dashboard_symptom_add_sheet_widget.dart';
 import 'package:caregivers_companion/components/dashboard_symptom_card/dashboard_symptom_card_widget.dart';
 import 'package:provider/provider.dart';
@@ -142,6 +143,28 @@ void main() {
       expect(find.text('Mark Resolved'), findsOneWidget);
       // The exported row's duplicate-creating control is gone.
       expect(find.text('Add Entry'), findsNothing);
+    });
+
+    testWidgets('shows the logged time as a local label, never the raw instant',
+        (tester) async {
+      // The exported row printed `record.timeLogged?.toString()`, i.e.
+      // `2026-11-22 01:15:56.015` — UTC, milliseconds and all.
+      final loggedAt = DateTime.utc(2026, 11, 22, 1, 15, 56, 15);
+      final record =
+          await seedSymptom('s1', recipient('mine'), timeLogged: loggedAt);
+      await pumpCard(tester, record);
+
+      expect(find.text(symptomEntryWhenLabel(loggedAt)), findsOneWidget);
+      expect(find.text(loggedAt.toString()), findsNothing);
+      expect(find.textContaining('01:15:56.015'), findsNothing);
+    });
+
+    testWidgets('a row with no logged time omits the line entirely',
+        (tester) async {
+      final record = await seedSymptom('s1', recipient('mine'));
+      await pumpCard(tester, record);
+
+      expect(find.text('Time Logged'), findsNothing);
     });
 
     testWidgets('tapping the row itself creates nothing and resolves nothing',
